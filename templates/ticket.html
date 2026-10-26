@@ -1,9 +1,69 @@
 {% extends "base.html" %}
-
-{% block title %}Ticket #{{ ticket.number }} · ClinicQ{% endblock %}
+{% block title %}Ticket #{{ ticket.number }} · Paprintco{% endblock %}
 
 {% block content %}
-  <h2>Ticket #{{ ticket.number }}</h2>
-  <p>Hi {{ ticket.name }}! You are <strong>number {{ position }}</strong> in the queue.</p>
-  <p><a href="{{ url_for('index') }}">&larr; Back to the queue</a></p>
+<div class="row justify-content-center">
+  <div class="col-12 col-md-9 col-lg-6">
+
+    <h1 class="h3 mb-3 fw-bolder">Hello, {{ first_name }}!</h1>
+
+    {# Ticket number, status and position: the biggest things on the page (Pia, rule 1). #}
+    <div class="card text-center mb-4">
+      <div class="card-body p-4">
+        <p class="text-body-secondary mb-0">Your Ticket</p>
+        <p class="display-1 fw-bold text-primary mb-2 ticket-number" aria-label="Ticket number {{ ticket.number }}">#{{ ticket.number }}</p>
+
+        <div id="live-status" aria-live="polite">
+          <span id="status-badge" class="badge rounded-pill fs-5 px-4 py-2 {{ info.badge }}">{{ info.label }}</span>
+          <p id="position-text" class="fs-4 fw-semibold mt-3 mb-0">{{ info.message }}</p>
+        </div>
+        <p class="small text-body-secondary mt-2 mb-0">Last updated {{ updated }}</p>
+      </div>
+    </div>
+
+    <h2 class="h5">Your Request</h2>
+    <div class="card mb-4">
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-5 col-sm-4">File</dt><dd class="col-7 col-sm-8 text-break">{{ ticket.file_name }}</dd>
+          <dt class="col-5 col-sm-4">Color mode</dt><dd class="col-7 col-sm-8">{{ ticket.color_mode }}</dd>
+          <dt class="col-5 col-sm-4">Copies</dt><dd class="col-7 col-sm-8">{{ ticket.number_of_copies }}</dd>
+          <dt class="col-5 col-sm-4">Paper type</dt><dd class="col-7 col-sm-8">{{ ticket.paper_type }}</dd>
+          <dt class="col-5 col-sm-4">Paper size</dt><dd class="col-7 col-sm-8 {% if not ticket.notes %}mb-0{% endif %}">{{ ticket.paper_size }}</dd>
+          {% if ticket.notes %}
+          <dt class="col-5 col-sm-4">Notes</dt><dd class="col-7 col-sm-8 mb-0">{{ ticket.notes }}</dd>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+
+    {% if ticket.status == 'waiting' %}
+      {# Cancel only shows while the request is waiting, and asks first (error prevention). #}
+      <button type="button" class="btn btn-outline-danger w-100" data-bs-toggle="modal" data-bs-target="#cancelModal">
+        Cancel request
+      </button>
+
+      <div class="modal fade" id="cancelModal" tabindex="-1" aria-labelledby="cancelModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 class="modal-title h5" id="cancelModalLabel">Cancel this request?</h2>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">You will lose your place in the queue. You can send a new request anytime.</div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-primary" data-bs-dismiss="modal">Keep request</button>
+              <form method="post" action="{{ url_for('leave', ticket_id=ticket.number) }}">
+                <button type="submit" class="btn btn-danger">Yes, cancel request</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% elif ticket.status in ('done', 'cancelled') %}
+      <a class="btn btn-primary w-100" href="{{ url_for('join_form') }}">Request another print</a>
+    {% endif %}
+
+  </div>
+</div>
 {% endblock %}

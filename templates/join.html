@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Request print · Paprintco{% endblock %}
+{% block title %}Request Print · Paprintco{% endblock %}
 
 {% macro bad(key) %}{% if errors.get(key) %}is-invalid{% endif %}{% endmacro %}
 {% macro err(key) %}{% if errors.get(key) %}<div id="{{ key }}-error" class="invalid-feedback d-block">{{ errors[key] }}</div>{% endif %}{% endmacro %}
@@ -55,10 +55,10 @@
 
         <div class="col-12 col-md-6">
           <label for="paper_type" class="form-label fw-bolder">Paper type</label>
+          {% set pt = form.get('paper_type', 'Bond Paper') %}
           <select id="paper_type" name="paper_type" required class="form-select {{ bad('paper_type') }}" {{ desc('paper_type') }}>
-            <option value="">Choose a paper type…</option>
             {% for p in paper_types %}
-              <option value="{{ p }}" {% if form.get('paper_type') == p %}selected{% endif %}>{{ p }}</option>
+              <option value="{{ p }}" {% if pt == p %}selected{% endif %}>{{ p }}</option>
             {% endfor %}
           </select>
           {{ err('paper_type') }}
@@ -66,10 +66,10 @@
 
         <div class="col-12 col-md-6">
           <label for="paper_size" class="form-label fw-bolder">Paper size</label>
+          {% set ps = form.get('paper_size', 'A4') %}
           <select id="paper_size" name="paper_size" required class="form-select {{ bad('paper_size') }}" {{ desc('paper_size') }}>
-            <option value="">Choose a paper size…</option>
             {% for s in paper_sizes %}
-              <option value="{{ s }}" {% if form.get('paper_size') == s %}selected{% endif %}>{{ s }}</option>
+              <option value="{{ s }}" {% if ps == s %}selected{% endif %}>{{ s }}</option>
             {% endfor %}
           </select>
           {{ err('paper_size') }}

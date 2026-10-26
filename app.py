@@ -4,6 +4,7 @@ Run it with:
     flask --app app run --debug
 then open http://127.0.0.1:5000
 """
+from datetime import datetime
 import os
 import uuid
 from flask import Flask, abort, flash, redirect, render_template, request, url_for
@@ -58,20 +59,55 @@ TICKETS = [
     },
 ]
 
+# Status words, badge styles and tracker steps for the My Place page.
+STATUS_LABELS = {
+    "waiting": "Waiting",
+    "printing": "Printing",
+    "ready": "Ready for pickup",
+    "done": "Done",
+    "cancelled": "Cancelled",
+}
+STATUS_BADGE = {
+    "waiting": "text-bg-warning",
+    "printing": "text-bg-primary",
+    "ready": "text-bg-success",
+    "done": "text-bg-secondary",
+    "cancelled": "text-bg-danger",
+}
+STEPS = ["waiting", "printing", "ready", "done"]
+STEP_LABELS = ["Waiting", "Printing", "Ready", "Done"]
 
-@app.route("/")
-def index():
-    # render_template looks inside the templates/ folder and passes
-    # keyword arguments to the template as variables.
-    return render_template("index.html")
+def get_ticket(number):
+    return next((t for t in TICKETS if t["number"] == number), None)
 
-@app.route("/queue/<int:ticket_id>")
-def ticket(ticket_id):
-    # <int:ticket_id> only matches numbers, so /queue/abc returns 404.
-    for position, t in enumerate(TICKETS, start=1):
-        if t["number"] == ticket_id:
-            return render_template("ticket.html", ticket=t, position=position)
-    abort(404)  # no ticket with that number
+def requests_ahead(t):
+    return sum(1 for x in TICKETS
+               if x["service_id"] == t["service_id"]
+               and x["status"] == "waiting"
+               and x["number"] < t["number"])
+
+def describe(t):
+    status = t["status"]
+    ahead = requests_ahead(t) if status == "waiting" else 0
+    if status == "waiting":
+        message = "You're next!" if ahead == 0 else (
+            "1 request ahead of you" if ahead == 1 else f"{ahead} requests ahead of you")
+    elif status == "printing":
+        message = "Your request is being printed."
+    elif status == "ready":
+        message = "Ready! Please pick it up at the printing station."
+    elif status == "done":
+        message = "Completed. Thank you!"
+    else:
+        message = "This request was cancelled."
+    return {
+        "status": status,
+        "label": STATUS_LABELS[status],
+        "badge": STATUS_BADGE[status],
+        "ahead": ahead,
+        "message": message,
+        "step": STEPS.index(status) if status in STEPS else -1,
+    }
 
 def form_context(form, errors):
     return dict(form=form, 
@@ -79,6 +115,35 @@ def form_context(form, errors):
                 color_modes=COLOR_MODES,
                 paper_types=PAPER_TYPES, 
                 paper_sizes=PAPER_SIZES)
+
+@app.route("/")
+def index():
+    # render_template looks inside the templates/ folder and passes
+    # keyword arguments to the template as variables.
+    return render_template("index.html")
+
+@app.get("/queue/<int:ticket_id>")
+def ticket(ticket_id):
+    t = get_ticket(ticket_id)
+    if t is None:
+        abort(404)  # no ticket with that number
+    return render_template("ticket.html", 
+                           ticket=t, 
+                           info=describe(t),
+                           first_name=t["name"].split()[0],
+                           updated=datetime.now().strftime("%I:%M %p").lstrip("0"))
+
+@app.post("/queue/<int:ticket_id>/leave")
+def leave(ticket_id):
+    t = get_ticket(ticket_id)
+    if t is None:
+        abort(404)
+    if t["status"] != "waiting":
+        flash("Only a request that is still waiting can be cancelled.", "warning")
+        return redirect(url_for("ticket", ticket_id=ticket_id))
+    t["status"] = "cancelled"
+    flash(f"Request #{ticket_id} was cancelled. You can send a new request anytime.", "info")
+    return redirect(url_for("index"))
 
 @app.get("/join")
 def join_form():
@@ -150,10 +215,13 @@ def too_large(_err):
     flash("That file is too large. The limit is 16 MB.", "danger")
     return render_template("join.html", **form_context({}, {"file": "Choose a PDF under 16 MB."})), 413
 
+@app.errorhandler(404)
+def page_not_found(error):
+    return render_template("404.html"), 404
+
 @app.route("/staff")
 def staff_dashboard():
     return "Staff dashboard coming soon"
 
 if __name__ == "__main__":
-    # Lets you also start the app with: python app.py
     app.run(debug=True)

@@ -103,4 +103,9 @@ footer {
   #join-form {
     padding-bottom: 5rem !important;
   }
+
+  .ticket-number {
+    font-size: clamp(4rem, 15vw, 6rem);
+    line-height: 1;
+  }
 }
