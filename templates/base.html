@@ -13,7 +13,7 @@
 
   <nav class="navbar navbar-expand-md bg-primary" data-bs-theme="dark">
     <div class="container">
-      <a class="navbar-brand" href="{{ url_for('index') }}">Paprintco</a>
+      <a class="navbar-brand fw-bolder" href="{{ url_for('index') }}">Paprintco</a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
               data-bs-target="#mainNav" aria-controls="mainNav"
               aria-expanded="false" aria-label="Toggle navigation">
@@ -22,7 +22,7 @@
       <div class="collapse navbar-collapse" id="mainNav">
         <ul class="navbar-nav ms-auto">
           <li class="nav-item">
-            <a class="nav-link {% if request.endpoint == 'join_form' %}active{% endif %}"
+            <a class="nav-link {% if request.endpoint == 'join_form' or request.endpoint == 'join' %}active{% endif %}"
                {% if request.endpoint == 'join_form' %}aria-current="page"{% endif %}
                href="{{ url_for('join_form') }}">Request print</a>
           </li>
