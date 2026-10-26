@@ -56,10 +56,8 @@ It is 2 PM and the office is crowded. Renebel opens the Paprintco staff dashboar
  
 | Task | Screen | Requirement ID |
 | --- | --- | --- |
-| See all pending requests and their printing specifications in queue order | Staff dashboard | FR-06 |
+| See all waiting requests and their printing specifications in queue order | Staff dashboard | FR-06 |
 | Print the next request and update its status | Staff dashboard | FR-07 |
-| Download the file and check print specifications | Staff dashboard | FR-08 |
-| Filter requests by status | Staff dashboard | FR-09 |
  
 ### What this means for my interface
 
