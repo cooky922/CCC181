@@ -141,6 +141,10 @@ a.nav-link:focus-visible,
   z-index: 1;
 }
 
+.pq-table { min-width: 36rem; }
+.pq-table th,
+.pq-table td { white-space: nowrap; }
+
 /* For smaller screens */
 @media (max-width: 500px) {
   .ticket-number {

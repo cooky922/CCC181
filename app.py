@@ -7,7 +7,7 @@ then open http://127.0.0.1:5000
 from datetime import datetime
 import os
 import uuid
-from flask import Flask, abort, flash, redirect, render_template, request, url_for, send_from_directory
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for, send_from_directory
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
@@ -126,8 +126,12 @@ def describe_ticket(ticket):
         "label": STATUS_LABELS[status],
         "badge": STATUS_BADGE[status],
         "ahead": ahead,
-        "message": message
+        "message": message,
+        "color": STATUS_COLOR[status]
     }
+
+def clock():
+    return datetime.now().strftime("%I:%M %p").lstrip("0")
 
 def form_context(form, errors):
     return dict(form=form, 
@@ -151,7 +155,14 @@ def ticket(ticket_id):
                            ticket=ticket, 
                            info=describe_ticket(ticket),
                            first_name=ticket["name"].split()[0],
-                           updated=datetime.now().strftime("%I:%M %p").lstrip("0"))
+                           updated=clock())
+
+@app.get("/queue/<int:ticket_id>/status.json")
+def ticket_status(ticket_id):
+    ticket = get_ticket(ticket_id)
+    if ticket is None:
+        abort(404)
+    return jsonify({**describe_ticket(ticket), "updated": clock()})
 
 @app.post("/queue/<int:ticket_id>/leave")
 def leave(ticket_id):
