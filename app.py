@@ -68,11 +68,11 @@ STATUS_LABELS = {
     "cancelled": "Cancelled",
 }
 STATUS_COLOR = {
-    "waiting": "text-warning",
-    "printing": "text-primary",
-    "ready": "text-success",
-    "done": "text-dark",
-    "cancelled": "text-danger",
+    "waiting": "text-warning-emphasis",
+    "printing": "text-primary-emphasis",
+    "ready": "text-success-emphasis",
+    "done": "text-dark-emphasis",
+    "cancelled": "text-danger-emphasis",
 }
 STATUS_BADGE = {
     "waiting": "text-bg-warning",
@@ -126,8 +126,7 @@ def describe_ticket(ticket):
         "label": STATUS_LABELS[status],
         "badge": STATUS_BADGE[status],
         "ahead": ahead,
-        "message": message,
-        "color": STATUS_COLOR[status]
+        "message": message
     }
 
 def clock():

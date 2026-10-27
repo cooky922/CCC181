@@ -25,6 +25,17 @@ h1.special-underline {
   font-weight: 600;
 }
 
+.navbar-brand,
+.navbar-toggler { min-height: var(--pq-tap-size); }
+
+.navbar-brand:focus-visible,
+.navbar-toggler:focus-visible,
+.navbar a.nav-link:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
 /* Button */
 .btn {
   min-height: var(--pq-tap-size);
