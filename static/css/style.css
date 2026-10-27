@@ -1,111 +1,152 @@
-/* Colors borrowed from the Week 2 slide deck */
-
+/* Base */
 :root {
-  --navy: #16223A;
-  --paper: #F6F4EE;
-  --card: #FFFDF8;
-  --teal: #2D6F78;
-  --orange: #B4501E;
+  --bs-body-font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pq-tap-size: 44px;   /* minimum height of anything you click (e.g. buttons, fields) */
 }
 
-body {
-  margin: 0;
-  font-family: "IBM Plex Sans", Arial, sans-serif;
-  background: var(--paper);
-  color: #1B2438;
+th { vertical-align: middle; }
+
+h1.special-underline {
+  text-decoration: underline;
+  text-decoration-thickness: 4px;
+  text-underline-offset: 8px;
 }
 
-header {
-  background: var(--navy);
-  color: var(--paper);
-  padding: 1.5rem 2rem;
+/* Navbar */
+.navbar-brand {
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
-header h1 { margin: 0; }
-header a { color: var(--paper); text-decoration: none; }
-.tagline { margin: 0.25rem 0 0; color: #C5CEDD; }
-
-main {
-  max-width: 720px;
-  margin: 2rem auto;
-  padding: 0 1rem;
-}
-
-h2 { color: var(--teal); }
-
-.tickets { list-style: none; padding: 0; }
-.tickets li {
-  background: var(--card);
-  border: 1px solid #E2DED3;
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 0.5rem;
-}
-.tickets a { color: var(--orange); font-weight: 600; }
-
-code { background: #ECE8DE; padding: 0 0.3rem; border-radius: 4px; }
-
-footer {
-  text-align: center;
-  color: #5A6272;
-  padding: 2rem 0;
-}
-
-/* Join-queue form */
-.button, .join-form button {
-  display: inline-block;
-  background: var(--teal);
+.navbar[data-bs-theme="dark"] .navbar-nav .nav-link        { color: rgba(255, 255, 255, 0.88); }
+.navbar[data-bs-theme="dark"] .navbar-nav .nav-link:hover  { color: #fff; }
+.navbar[data-bs-theme="dark"] .navbar-nav .nav-link.active {
   color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 0.6rem 1.2rem;
-  font: inherit;
-  text-decoration: none;
-  cursor: pointer;
+  font-weight: 600;
 }
 
-.join-form {
+/* Button */
+.btn {
+  min-height: var(--pq-tap-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn.btn-sm {
+  min-height: 32px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+/* Forms */
+.form-label { font-weight: 600; }
+
+.form-control,
+.form-select { min-height: var(--pq-tap-size); }
+
+.form-control[type="file"] {
+  padding: 0 0.75rem 0 0;
+  line-height: calc(var(--pq-tap-size) - 2px);
+}
+.form-control[type="file"]::file-selector-button {
+  margin: 0 0.75rem 0 0;
+  padding: 0 0.75rem;
+  line-height: calc(var(--pq-tap-size) - 2px);
+}
+
+/* Keyboard Focus */
+.btn-check:focus-visible + .btn,
+.btn:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible,
+a.nav-link:focus-visible,
+.pq-chip:focus-visible {
+  outline: 2px solid black;
+  outline-offset: 2px;
+}
+
+/* Staff Dashboard Filter Chips */
+.pq-chips {
   display: flex;
-  flex-direction: column;
   gap: 0.5rem;
-  max-width: 320px;
+  overflow-x: auto;
+  padding: 4px;
 }
 
-.join-form input {
-  padding: 0.5rem;
-  border: 1px solid #C9C4B8;
-  border-radius: 6px;
-  font: inherit;
+.pq-chip {
+  --chip: #6c757d;
+  --chip-text: #495057;
+  --chip-on: #fff;
+
+  flex: 0 0 auto;
+  min-width: 7rem;
+  min-height: 56px;
+  padding: 0.5rem 0.75rem;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+
+  background: #fff;
+  color: var(--chip-text);
+  border: 1.4px solid var(--chip);
+  border-radius: 0.5rem;
+
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pq-chip:hover { background: #f1f3f5; color: var(--chip-text); }
+
+/* The chosen count is filled. */
+.pq-chip.is-active,
+.pq-chip.is-active:hover {
+  background: var(--chip);
+  color: var(--chip-on);
 }
 
-.error { color: var(--orange); font-weight: 600; }
+/* One color per status. "All" uses the gray defaults above. */
+.chip-waiting   { --chip: #ffc107; --chip-text: #7a5b00; --chip-on: #000; }
+.chip-ready     { --chip: #198754; --chip-text: #146c43; }
+.chip-done      { --chip: #212529; --chip-text: #212529; }
+.chip-cancelled { --chip: #dc3545; --chip-text: #b02a37; }
 
-.submit-section {
-  margin-top: 1rem;
+.pq-count {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
+@media (min-width: 992px) {
+  .pq-chips {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    overflow: visible;
+  }
+  .pq-chip { min-width: 0; }
+}
+
+#dashboard:focus { outline: none; }
+
+/* Request Table */
+.pq-scroll {
+  max-height: 34rem;
+  overflow-y: auto;
+}
+.pq-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* For smaller screens */
 @media (max-width: 500px) {
-  .submit-section {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 1030;
-    padding: 0.75rem;
-    background: rgba(255, 255, 255, 0.95);
-    border-top: 1px solid #dee2e6;
-  }
-
-  .submit-section button {
-    width: 100%;
-  }
-
-  #join-form {
-    padding-bottom: 5rem !important;
-  }
-
   .ticket-number {
     font-size: clamp(4rem, 15vw, 6rem);
     line-height: 1;
   }
+
+  .btn.btn-sm { min-height: var(--pq-tap-size); } 
 }

@@ -7,7 +7,7 @@ then open http://127.0.0.1:5000
 from datetime import datetime
 import os
 import uuid
-from flask import Flask, abort, flash, redirect, render_template, request, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, url_for, send_from_directory
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
@@ -36,7 +36,7 @@ TICKETS = [
         "name": "Desmond Gold",
         "service_id": 1,
         "file_name": "assignment.pdf",
-        "file_path": "uploads/assignment.pdf",
+        "file_path": None,
         "number_of_copies": 3,
         "paper_size": "A4",
         "paper_type": "Bond Paper",
@@ -49,7 +49,7 @@ TICKETS = [
         "name": "Lex Ian",
         "service_id": 1,
         "file_name": "report.pdf",
-        "file_path": "uploads/report.pdf",
+        "file_path": None,
         "number_of_copies": 1,
         "paper_size": "Long",
         "paper_type": "Bond Paper",
@@ -67,46 +67,66 @@ STATUS_LABELS = {
     "done": "Done",
     "cancelled": "Cancelled",
 }
+STATUS_COLOR = {
+    "waiting": "text-warning",
+    "printing": "text-primary",
+    "ready": "text-success",
+    "done": "text-dark",
+    "cancelled": "text-danger",
+}
 STATUS_BADGE = {
     "waiting": "text-bg-warning",
     "printing": "text-bg-primary",
     "ready": "text-bg-success",
-    "done": "text-bg-secondary",
+    "done": "text-bg-dark",
     "cancelled": "text-bg-danger",
 }
-STEPS = ["waiting", "printing", "ready", "done"]
-STEP_LABELS = ["Waiting", "Printing", "Ready", "Done"]
+# Filter choices for the staff table: (value in the URL, label on the button).
+FILTERS = [
+    ("waiting", "Waiting"),
+    ("ready", "Ready"),
+    ("done", "Done"),
+    ("cancelled", "Cancelled"),
+    ("all", "All requests"),
+]
+CHIP_STYLE = {
+    "waiting": "chip-waiting",
+    "ready": "chip-ready",
+    "done": "chip-done",
+    "cancelled": "chip-cancelled",
+    "all": "chip-all",
+}
 
 def get_ticket(number):
-    return next((t for t in TICKETS if t["number"] == number), None)
+    return next((ticket for ticket in TICKETS if ticket["number"] == number), None)
 
-def requests_ahead(t):
+def requests_ahead(ticket):
     return sum(1 for x in TICKETS
-               if x["service_id"] == t["service_id"]
+               if x["service_id"] == ticket["service_id"]
                and x["status"] == "waiting"
-               and x["number"] < t["number"])
+               and x["number"] < ticket["number"])
 
-def describe(t):
-    status = t["status"]
-    ahead = requests_ahead(t) if status == "waiting" else 0
-    if status == "waiting":
-        message = "You're next!" if ahead == 0 else (
-            "1 request ahead of you" if ahead == 1 else f"{ahead} requests ahead of you")
-    elif status == "printing":
-        message = "Your request is being printed."
-    elif status == "ready":
-        message = "Ready! Please pick it up at the printing station."
-    elif status == "done":
-        message = "Completed. Thank you!"
-    else:
-        message = "This request was cancelled."
+def describe_ticket(ticket):
+    status = ticket["status"]
+    ahead = requests_ahead(ticket) if status == "waiting" else 0
+    match status:
+        case "waiting":
+            message = "You're next!" if ahead == 0 else (
+                "1 request ahead of you" if ahead == 1 else f"{ahead} requests ahead of you")
+        case "printing":
+            message = "Your request is being printed."
+        case "ready":
+            message = "Ready! Please pick it up at the printing station."
+        case "done":
+            message = "Completed. Thank you!"
+        case _:
+            message = "This request was cancelled."
     return {
         "status": status,
         "label": STATUS_LABELS[status],
         "badge": STATUS_BADGE[status],
         "ahead": ahead,
-        "message": message,
-        "step": STEPS.index(status) if status in STEPS else -1,
+        "message": message
     }
 
 def form_context(form, errors):
@@ -124,24 +144,24 @@ def index():
 
 @app.get("/queue/<int:ticket_id>")
 def ticket(ticket_id):
-    t = get_ticket(ticket_id)
-    if t is None:
+    ticket = get_ticket(ticket_id)
+    if ticket is None:
         abort(404)  # no ticket with that number
     return render_template("ticket.html", 
-                           ticket=t, 
-                           info=describe(t),
-                           first_name=t["name"].split()[0],
+                           ticket=ticket, 
+                           info=describe_ticket(ticket),
+                           first_name=ticket["name"].split()[0],
                            updated=datetime.now().strftime("%I:%M %p").lstrip("0"))
 
 @app.post("/queue/<int:ticket_id>/leave")
 def leave(ticket_id):
-    t = get_ticket(ticket_id)
-    if t is None:
+    ticket = get_ticket(ticket_id)
+    if ticket is None:
         abort(404)
-    if t["status"] != "waiting":
+    if ticket["status"] != "waiting":
         flash("Only a request that is still waiting can be cancelled.", "warning")
         return redirect(url_for("ticket", ticket_id=ticket_id))
-    t["status"] = "cancelled"
+    ticket["status"] = "cancelled"
     flash(f"Request #{ticket_id} was cancelled. You can send a new request anytime.", "info")
     return redirect(url_for("index"))
 
@@ -210,6 +230,117 @@ def join():
     flash(f"Request submitted. Your ticket is #{number}.", "success")
     return redirect(url_for("ticket", ticket_id=number))
 
+def get_status_count_table():
+    c = {key: 0 for key in STATUS_LABELS}
+    for t in TICKETS:
+        c[t["status"]] += 1
+    c["total"] = len(TICKETS)
+    return c
+
+
+def waiting_list():
+    """Waiting requests in ticket order (oldest first)."""
+    return sorted((t for t in TICKETS if t["status"] == "waiting"), key=lambda t: t["number"])
+
+
+def current_printing():
+    """The one request being printed right now, or None."""
+    return next((t for t in TICKETS if t["status"] == "printing"), None)
+
+
+@app.context_processor
+def inject_status_words():
+    return {"STATUS_LABELS": STATUS_LABELS, 
+            "STATUS_BADGE": STATUS_BADGE,
+            "STATUS_COLOR": STATUS_COLOR}
+
+def chosen_filter(value):
+    """Only known filter names are accepted; anything else falls back to Waiting."""
+    return value if value in dict(FILTERS) else "waiting"
+
+@app.get("/staff")
+def staff_dashboard():
+    view = chosen_filter(request.args.get("status"))
+    everyone = sorted(TICKETS, key=lambda t: t["number"])
+    rows = everyone if view == "all" else [t for t in everyone if t["status"] == view]
+    printing = current_printing()
+    waiting = waiting_list()
+    return render_template(
+        "staff.html",
+        printing=printing,
+        rows=rows,
+        chip_style=CHIP_STYLE,
+        filters=FILTERS,
+        view=view,
+        view_label=dict(FILTERS)[view],
+        head_number=waiting[0]["number"] if waiting else None,
+        c=get_status_count_table(),
+    )
+
+def back_to_dashboard():
+    """Return to the dashboard with the same filter the staff member was looking at."""
+    return redirect(url_for("staff_dashboard", status=chosen_filter(request.form.get("view"))))
+
+def start_printing(ticket_id=None):
+    """Move the oldest waiting request to printing. Returns True if it started."""
+    waiting = waiting_list()
+    busy = current_printing()
+    if busy:
+        flash(f"Ticket #{busy['number']} is still printing. Mark it as ready first.", "warning")
+    elif not waiting:
+        flash("No one is waiting.", "info")
+    elif ticket_id is not None and waiting[0]["number"] != ticket_id:
+        flash(f"First come, first served: ticket #{waiting[0]['number']} goes first.", "warning")
+    else:
+        waiting[0]["status"] = "printing"
+        flash(f"Ticket #{waiting[0]['number']} is now printing.", "info")
+
+@app.post("/staff/call-next")
+def staff_call_next():
+    start_printing()
+    return back_to_dashboard()
+
+@app.post("/staff/tickets/<int:ticket_id>/<action>")
+def staff_action(ticket_id, action):
+    # Data-changing actions use POST, and the server re-checks every rule.
+    t = get_ticket(ticket_id)
+    if t is None or action not in ("start", "ready", "done", "cancel"):
+        abort(404)
+    status = t["status"]
+
+    if action == "start":
+        if status != "waiting":
+            flash(f"Ticket #{ticket_id} is not waiting.", "warning")
+        else:
+            start_printing(ticket_id)
+    elif action == "ready":
+        if status != "printing":
+            flash("Only the request that is printing can be marked ready.", "warning")
+        else:
+            t["status"] = "ready"
+            flash(f"Ticket #{ticket_id} is ready for pickup.", "success")
+    elif action == "done":
+        if status != "ready":
+            flash("Only a ready request can be marked done.", "warning")
+        else:
+            t["status"] = "done"
+            flash(f"Ticket #{ticket_id} is done.", "success")
+    else:  # cancel
+        if status != "waiting":
+            flash("Only a waiting request can be cancelled.", "warning")
+        else:
+            t["status"] = "cancelled"
+            flash(f"Ticket #{ticket_id} was cancelled.", "info")
+    return back_to_dashboard()
+
+@app.get("/staff/tickets/<int:ticket_id>/file")
+def staff_file(ticket_id):
+    t = get_ticket(ticket_id)
+    if t is None or not t.get("file_path"):
+        abort(404)
+    return send_from_directory(UPLOAD_DIR, os.path.basename(t["file_path"]),
+                               as_attachment=True, download_name=t["file_name"])
+
 @app.errorhandler(RequestEntityTooLarge)
 def too_large(_err):
     flash("That file is too large. The limit is 16 MB.", "danger")
@@ -218,10 +349,6 @@ def too_large(_err):
 @app.errorhandler(404)
 def page_not_found(error):
     return render_template("404.html"), 404
-
-@app.route("/staff")
-def staff_dashboard():
-    return "Staff dashboard coming soon"
 
 if __name__ == "__main__":
     app.run(debug=True)

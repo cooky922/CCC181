@@ -5,13 +5,13 @@
 <div class="row justify-content-center">
   <div class="col-12 col-md-9 col-lg-6">
 
-    <h1 class="h3 mb-3 fw-bolder">Hello, {{ first_name }}!</h1>
+    <h1 class="h3 mb-3 fw-bolder special-underline">Hello, {{ first_name }}!</h1>
 
     {# Ticket number, status and position: the biggest things on the page (Pia, rule 1). #}
     <div class="card text-center mb-4">
       <div class="card-body p-4">
         <p class="text-body-secondary mb-0">Your Ticket</p>
-        <p class="display-1 fw-bold text-primary mb-2 ticket-number" aria-label="Ticket number {{ ticket.number }}">#{{ ticket.number }}</p>
+        <p class="display-1 fw-bold {{ STATUS_COLOR[ticket.status] }} mb-2 ticket-number" aria-label="Ticket number {{ ticket.number }}">#{{ ticket.number }}</p>
 
         <div id="live-status" aria-live="polite">
           <span id="status-badge" class="badge rounded-pill fs-5 px-4 py-2 {{ info.badge }}">{{ info.label }}</span>
