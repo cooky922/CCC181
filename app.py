@@ -6,6 +6,7 @@ then open http://127.0.0.1:5000
 """
 from datetime import datetime
 import os
+import re
 import uuid
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for, send_from_directory
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -13,6 +14,8 @@ from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+SAVED_PDF = re.compile(r"^[0-9a-f]{32}\.pdf$")
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
@@ -42,7 +45,7 @@ TICKETS = [
         "paper_type": "Bond Paper",
         "color_mode": "Grayscale",
         "notes": "",
-        "status": "waiting",
+        "status": "printing",
     },
     {
         "number": 2,
@@ -55,7 +58,7 @@ TICKETS = [
         "paper_type": "Bond Paper",
         "color_mode": "Colored",
         "notes": "",
-        "status": "printing",
+        "status": "waiting",
     },
 ]
 
@@ -132,9 +135,10 @@ def describe_ticket(ticket):
 def clock():
     return datetime.now().strftime("%I:%M %p").lstrip("0")
 
-def form_context(form, errors):
+def form_context(form, errors, pending = None):
     return dict(form=form, 
-                errors=errors, 
+                errors=errors,
+                pending=pending,
                 color_modes=COLOR_MODES,
                 paper_types=PAPER_TYPES, 
                 paper_sizes=PAPER_SIZES)
@@ -175,6 +179,30 @@ def leave(ticket_id):
     flash(f"Request #{ticket_id} was cancelled. You can send a new request anytime.", "info")
     return redirect(url_for("index"))
 
+def saved_pdf(name):
+    """The stored name of a PDF kept from an earlier try, if it is safe and still on disk."""
+    if SAVED_PDF.match(name or "") and os.path.exists(os.path.join(UPLOAD_DIR, name)):
+        return name
+    return None
+
+@app.get("/pending-upload/<name>")
+def pending_upload(name):
+    """Return a previously saved PDF so the browser can display it in the file input."""
+    stored_name = saved_pdf(name)
+
+    if stored_name is None:
+        abort(404)
+
+    response = send_from_directory(
+        UPLOAD_DIR,
+        stored_name,
+        mimetype="application/pdf",
+        as_attachment=False
+    )
+
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 @app.get("/join")
 def join_form():
     return render_template("join.html", **form_context({}, {}))
@@ -189,6 +217,9 @@ def join():
     paper_size = form.get("paper_size", "")
     notes = form.get("notes", "").strip()
     upload = request.files.get("file")
+    kept_name = saved_pdf(form.get("pending_file", ""))
+    stored_name = kept_name 
+    file_label = form.get("pending_label", "")[:120] if kept_name else ""
 
     errors = {}
     if not name:
@@ -196,14 +227,36 @@ def join():
     elif len(name) > 60:
         errors["name"] = "Keep your name under 60 characters."
 
-    if upload is None or not upload.filename:
-        errors["file"] = "Attach the PDF you want printed."
-    elif not upload.filename.lower().endswith(".pdf"):
-        errors["file"] = "Only PDF files are accepted. Save or export your file as a PDF first."
-    elif upload.stream.read(5) != b"%PDF-":
-        errors["file"] = "That file does not look like a valid PDF. Try exporting it again."
-    else:
-        upload.stream.seek(0)
+    # Check whether the user selected a NEW file.
+    # An empty filename means no new file was selected.
+    has_new_upload = upload is not None and bool(upload.filename)
+
+    if has_new_upload:
+        if not upload.filename.lower().endswith(".pdf"):
+            errors["file"] = "Only PDF files are accepted. Save or export your file as a PDF first."
+
+        elif upload.stream.read(5) != b"%PDF-":
+            errors["file"] = "That file does not look like a valid PDF. Try exporting it again."
+
+        else:
+            # Save the valid PDF immediately, even if another field has an error.
+            upload.stream.seek(0)
+
+            new_stored_name = f"{uuid.uuid4().hex}.pdf"
+            upload.save(os.path.join(UPLOAD_DIR, new_stored_name))
+
+            # Replace the previous pending PDF, if one exists.
+            if kept_name:
+                old_path = os.path.join(UPLOAD_DIR, kept_name)
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+
+            stored_name = new_stored_name
+            file_label = secure_filename(upload.filename) or "document.pdf"
+
+    elif not kept_name:
+        # No new file was selected and no previously uploaded PDF exists.
+        errors["file"] = "Attach the PDF you want to be printed."
 
     if color_mode not in COLOR_MODES:
         errors["color_mode"] = "Choose Grayscale or Colored."
@@ -218,17 +271,15 @@ def join():
 
     if errors:
         flash("Please fix the highlighted fields.", "danger")
-        return render_template("join.html", **form_context(form, errors)), 400
-
-    stored_name = f"{uuid.uuid4().hex}.pdf"
-    upload.save(os.path.join(UPLOAD_DIR, stored_name))
+        pending = {"file": stored_name, "label": file_label} if stored_name else None
+        return render_template("join.html", **form_context(form, errors, pending)), 400
 
     number = TICKETS[-1]["number"] + 1 if TICKETS else 1
     TICKETS.append({
         "number": number,
         "name": name,
         "service_id": SERVICES[0]["id"],
-        "file_name": secure_filename(upload.filename) or "document.pdf",
+        "file_name": file_label,
         "file_path": f"uploads/{stored_name}",
         "number_of_copies": copies,
         "paper_size": paper_size,
@@ -348,8 +399,10 @@ def staff_file(ticket_id):
     t = get_ticket(ticket_id)
     if t is None or not t.get("file_path"):
         abort(404)
-    return send_from_directory(UPLOAD_DIR, os.path.basename(t["file_path"]),
-                               as_attachment=True, download_name=t["file_name"])
+    return send_from_directory(UPLOAD_DIR, 
+                               os.path.basename(t["file_path"]),
+                               as_attachment=True, 
+                               download_name=t["file_name"])
 
 @app.errorhandler(RequestEntityTooLarge)
 def too_large(_err):

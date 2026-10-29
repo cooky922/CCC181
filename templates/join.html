@@ -24,10 +24,30 @@
 
         <div class="col-12">
           <label for="file" class="form-label fw-bolder">File to print</label>
-          <input id="file" name="file" type="file" required accept=".pdf,application/pdf"
-                 class="form-control {{ bad('file') }}"
-                 aria-describedby="file-help{% if errors.get('file') %} file-error{% endif %}">
-          <div id="file-help" class="form-text">PDF only (up to 16 MB). If the form reloads, attach the file again.</div>
+
+          {% if pending %}
+            <input type="hidden" name="pending_file" value="{{ pending.file }}">
+            <input type="hidden" name="pending_label" value="{{ pending.label }}">
+          {% endif %}
+
+          <input
+            id="file"
+            name="file"
+            type="file"
+            {% if not pending %}required{% endif %}
+            accept=".pdf,application/pdf"
+            {% if pending %}
+              data-pending-url="{{ url_for('pending_upload', name=pending.file) }}"
+              data-pending-name="{{ pending.label }}"
+            {% endif %}
+            class="form-control {{ bad('file') }}"
+            aria-describedby="file-help{% if errors.get('file') %} file-error{% endif %}"
+          >
+
+          <div id="file-help" class="form-text">
+            PDF only (up to 16 MB).
+          </div>
+
           {{ err('file') }}
         </div>
 
@@ -89,4 +109,45 @@
     </form>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+{% if pending %}
+<script>
+  (() => {
+    const input = document.getElementById("file");
+    if (!input) return;
+    async function restorePendingFile() {
+      try {
+        // retrieve the actual PDF saved on the server.
+        const response = await fetch(input.dataset.pendingUrl, {
+          cache: "no-store"
+        });
+
+        if (!response.ok) {
+          throw new Error("Could not retrieve the pending PDF.");
+        }
+
+        const blob = await response.blob();
+
+        const file = new File(
+          [blob],
+          input.dataset.pendingName,
+          { type: "application/pdf" }
+        );
+
+        // Populate the browser's file input.
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+
+        input.files = dataTransfer.files;
+
+      } catch (error) {
+        console.error("Unable to restore pending PDF:", error);
+      }
+    }
+
+    restorePendingFile();
+  })();
+</script>
+{% endif %}
 {% endblock %}

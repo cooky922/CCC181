@@ -21,10 +21,10 @@ It is the week before the thesis draft is due. Pia finishes revising her Chapter
 | Task | Screen | Requirement ID |
 | --- | --- | --- |
 | Submit their name, PDF attachment, and its printing specifications | Request print | FR-01 |
-| Receive their ticket number for their print request | My ticket | FR-02 |
-| Check how many requests are ahead and the current status | My ticket | FR-03 |
-| See how close the line is to finishing | Queue line | FR-04 |
-| Cancel a request that is still waiting | My ticket | FR-05 |
+| Receive their ticket number for their print request | My place | FR-02 |
+| Check how many requests are ahead and the current status | My place | FR-03 |
+| See how their queue position and status gets updated automatically | My place | FR-04 |
+| Cancel a request that is still waiting | My place | FR-05 |
  
 ### What this means for my interface
  
