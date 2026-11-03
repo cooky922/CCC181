@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Request Print · Paprintco{% endblock %}
+
+{% macro bad(key) %}{% if errors.get(key) %}is-invalid{% endif %}{% endmacro %}
+{% macro err(key) %}{% if errors.get(key) %}<div id="{{ key }}-error" class="invalid-feedback d-block">{{ errors[key] }}</div>{% endif %}{% endmacro %}
+{% macro desc(key) %}{% if errors.get(key) %}aria-describedby="{{ key }}-error"{% endif %}{% endmacro %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-md-8 col-lg-6">
+    <h1 class="h3 mb-3 fw-bolder special-underline">Request Print</h1>
+
+    <form method="post" action="{{ url_for('join') }}" enctype="multipart/form-data"
+          novalidate id="join-form" class="card card-body p-3 p-md-4">
+      <div class="row g-3">
+
+        <div class="col-12">
+          <label for="name" class="form-label fw-bolder">Your name</label>
+          <input id="name" name="name" type="text" autocomplete="name" required maxlength="60"
+                 placeholder="Enter your name"
+                 class="form-control {{ bad('name') }}" value="{{ form.get('name', '') }}" {{ desc('name') }}>
+          {{ err('name') }}
+        </div>
+
+        <div class="col-12">
+          <label for="file" class="form-label fw-bolder">File to print</label>
+
+          {% if pending %}
+            <input type="hidden" name="pending_file" value="{{ pending.file }}">
+            <input type="hidden" name="pending_label" value="{{ pending.label }}">
+          {% endif %}
+
+          <input
+            id="file"
+            name="file"
+            type="file"
+            {% if not pending %}required{% endif %}
+            accept=".pdf,application/pdf"
+            {% if pending %}
+              data-pending-url="{{ url_for('pending_upload', name=pending.file) }}"
+              data-pending-name="{{ pending.label }}"
+            {% endif %}
+            class="form-control {{ bad('file') }}"
+            aria-describedby="file-help{% if errors.get('file') %} file-error{% endif %}"
+          >
+
+          <div id="file-help" class="form-text">
+            PDF only (up to 16 MB).
+          </div>
+
+          {{ err('file') }}
+        </div>
+
+        <div class="col-12 col-md-6">
+          <span class="form-label d-block fw-bolder" id="color-label">Color mode</span>
+          {% set cm = form.get('color_mode', 'Grayscale') %}
+          <div class="btn-group w-100" role="group" aria-labelledby="color-label">
+            {% for mode in color_modes %}
+              <input type="radio" class="btn-check" name="color_mode" id="cm-{{ loop.index }}"
+                     value="{{ mode }}" {% if cm == mode %}checked{% endif %}>
+              <label class="btn btn-outline-primary" for="cm-{{ loop.index }}">{{ mode }}</label>
+            {% endfor %}
+          </div>
+          {{ err('color_mode') }}
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label for="number_of_copies" class="form-label fw-bolder">Number of copies</label>
+          <input id="number_of_copies" name="number_of_copies" type="number" min="1" max="100"
+                 inputmode="numeric" required
+                 class="form-control {{ bad('number_of_copies') }}"
+                 value="{{ form.get('number_of_copies', '1') }}" {{ desc('number_of_copies') }}>
+          {{ err('number_of_copies') }}
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label for="paper_type" class="form-label fw-bolder">Paper type</label>
+          {% set pt = form.get('paper_type', 'Bond Paper') %}
+          <select id="paper_type" name="paper_type" required class="form-select {{ bad('paper_type') }}" {{ desc('paper_type') }}>
+            {% for p in paper_types %}
+              <option value="{{ p }}" {% if pt == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+          {{ err('paper_type') }}
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label for="paper_size" class="form-label fw-bolder">Paper size</label>
+          {% set ps = form.get('paper_size', 'A4') %}
+          <select id="paper_size" name="paper_size" required class="form-select {{ bad('paper_size') }}" {{ desc('paper_size') }}>
+            {% for s in paper_sizes %}
+              <option value="{{ s }}" {% if ps == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+          {{ err('paper_size') }}
+        </div>
+
+        <div class="col-12">
+          <label for="notes" class="form-label fw-bolder">Additional instructions <span class="text-body-secondary">(optional)</span></label>
+          <textarea id="notes" name="notes" rows="3" maxlength="300" placeholder="e.g. staple"
+                    class="form-control {{ bad('notes') }}" {{ desc('notes') }}>{{ form.get('notes', '') }}</textarea>
+          {{ err('notes') }}
+        </div>
+
+        <div class="col-12 submit-section">
+          <button type="submit" class="btn btn-primary btn-lg w-100 fw-bolder">Submit request</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+{% if pending %}
+<script>
+  (() => {
+    const input = document.getElementById("file");
+    if (!input) return;
+    async function restorePendingFile() {
+      try {
+        // retrieve the actual PDF saved on the server.
+        const response = await fetch(input.dataset.pendingUrl, {
+          cache: "no-store"
+        });
+
+        if (!response.ok) {
+          throw new Error("Could not retrieve the pending PDF.");
+        }
+
+        const blob = await response.blob();
+
+        const file = new File(
+          [blob],
+          input.dataset.pendingName,
+          { type: "application/pdf" }
+        );
+
+        // Populate the browser's file input.
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+
+        input.files = dataTransfer.files;
+
+      } catch (error) {
+        console.error("Unable to restore pending PDF:", error);
+      }
+    }
+
+    restorePendingFile();
+  })();
+</script>
+{% endif %}
+{% endblock %}

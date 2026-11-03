@@ -1,0 +1,167 @@
+/* Base */
+:root {
+  --bs-body-font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pq-tap-size: 44px;   /* minimum height of anything you click (e.g. buttons, fields) */
+}
+
+th { vertical-align: middle; }
+
+h1.special-underline {
+  text-decoration: underline;
+  text-decoration-thickness: 4px;
+  text-underline-offset: 8px;
+}
+
+/* Navbar */
+.navbar-brand {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.navbar[data-bs-theme="dark"] .navbar-nav .nav-link        { color: rgba(255, 255, 255, 0.88); }
+.navbar[data-bs-theme="dark"] .navbar-nav .nav-link:hover  { color: #fff; }
+.navbar[data-bs-theme="dark"] .navbar-nav .nav-link.active {
+  color: #fff;
+  font-weight: 600;
+}
+
+.navbar-brand,
+.navbar-toggler { min-height: var(--pq-tap-size); }
+
+.navbar-brand:focus-visible,
+.navbar-toggler:focus-visible,
+.navbar a.nav-link:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+/* Button */
+.btn {
+  min-height: var(--pq-tap-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn.btn-sm {
+  min-height: 32px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+/* Forms */
+.form-label { font-weight: 600; }
+
+.form-control,
+.form-select { min-height: var(--pq-tap-size); }
+
+.form-control[type="file"] {
+  padding: 0 0.75rem 0 0;
+  line-height: calc(var(--pq-tap-size) - 2px);
+}
+.form-control[type="file"]::file-selector-button {
+  margin: 0 0.75rem 0 0;
+  padding: 0 0.75rem;
+  line-height: calc(var(--pq-tap-size) - 2px);
+}
+
+/* Keyboard Focus */
+.btn-check:focus-visible + .btn,
+.btn:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible,
+a.nav-link:focus-visible,
+.pq-chip:focus-visible {
+  outline: 2px solid black;
+  outline-offset: 2px;
+}
+
+/* Staff Dashboard Filter Chips */
+.pq-chips {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding: 4px;
+}
+
+.pq-chip {
+  --chip: #6c757d;
+  --chip-text: #495057;
+  --chip-on: #fff;
+
+  flex: 0 0 auto;
+  min-width: 7rem;
+  min-height: 56px;
+  padding: 0.5rem 0.75rem;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+
+  background: #fff;
+  color: var(--chip-text);
+  border: 1.4px solid var(--chip);
+  border-radius: 0.5rem;
+
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pq-chip:hover { background: #f1f3f5; color: var(--chip-text); }
+
+/* The chosen count is filled. */
+.pq-chip.is-active,
+.pq-chip.is-active:hover {
+  background: var(--chip);
+  color: var(--chip-on);
+}
+
+/* One color per status. "All" uses the gray defaults above. */
+.chip-waiting   { --chip: #ffc107; --chip-text: #7a5b00; --chip-on: #000; }
+.chip-ready     { --chip: #198754; --chip-text: #146c43; }
+.chip-done      { --chip: #212529; --chip-text: #212529; }
+.chip-cancelled { --chip: #dc3545; --chip-text: #b02a37; }
+
+.pq-count {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@media (min-width: 992px) {
+  .pq-chips {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    overflow: visible;
+  }
+  .pq-chip { min-width: 0; }
+}
+
+#dashboard:focus { outline: none; }
+
+/* Request Table */
+.pq-scroll {
+  max-height: 34rem;
+  overflow-y: auto;
+}
+.pq-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.pq-table { min-width: 36rem; }
+.pq-table th,
+.pq-table td { white-space: nowrap; }
+
+/* For smaller screens */
+@media (max-width: 500px) {
+  .ticket-number {
+    font-size: clamp(4rem, 15vw, 6rem);
+    line-height: 1;
+  }
+
+  .btn.btn-sm { min-height: var(--pq-tap-size); } 
+}

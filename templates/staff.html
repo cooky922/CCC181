@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block title %}Staff Dashboard · Paprintco{% endblock %}
+
+{# Printing specs of the request #}
+{% macro specs(t) %}
+<dl class="row mb-0">
+  <dt class="col-5">File</dt>
+  <dd class="col-7 text-truncate" title="{{ t.file_name }}">
+    {% if t.file_path %}<a href="{{ url_for('staff_file', ticket_id=t.number) }}" aria-label="Download file for ticket {{ t.number }}">{{ t.file_name }}</a>
+    {% else %}{{ t.file_name }}{% endif %}
+  </dd>
+  <dt class="col-5">Color mode</dt><dd class="col-7">{{ t.color_mode }}</dd>
+  <dt class="col-5">Copies</dt><dd class="col-7">{{ t.number_of_copies }}</dd>
+  <dt class="col-5">Paper type</dt><dd class="col-7">{{ t.paper_type }}</dd>
+  <dt class="col-5">Paper size</dt><dd class="col-7 {% if not t.notes %}mb-0{% endif %}">{{ t.paper_size }}</dd>
+  {% if t.notes %}<dt class="col-5">Notes</dt><dd class="col-7 mb-0">{{ t.notes }}</dd>{% endif %}
+</dl>
+{% endmacro %}
+
+{# Ticket number, requester and status, a line, then the specifications. Used twice, so both look the same. #}
+{% macro ticket_info(t) %}
+<dl class="row mb-0">
+  <dt class="col-5">Ticket number</dt><dd class="col-7">#{{ t.number }}</dd>
+  <dt class="col-5">Requester</dt><dd class="col-7">{{ t.name }}</dd>
+  <dt class="col-5">Status</dt><dd class="col-7 mb-0"><span class="badge {{ STATUS_BADGE[t.status] }}">{{ STATUS_LABELS[t.status] }}</span></dd>
+</dl>
+<hr>
+{{ specs(t) }}
+{% endmacro %}
+
+{# One small POST form with one button. "view" keeps the same filter after the click. #}
+{% macro action(url, label, style, aria, view, disabled=False, hint='') %}
+<form method="post" action="{{ url }}" class="flex-fill">
+  <input type="hidden" name="view" value="{{ view }}">
+  <button type="submit" class="btn {{ style }} w-100 fw-bolder" aria-label="{{ aria }}"
+          {% if disabled %}disabled title="{{ hint }}"{% endif %}>{{ label }}</button>
+</form>
+{% endmacro %}
+
+{% macro row_actions(t, view, printing, head_number) %}
+{% if t.status == 'waiting' %}
+  {% set blocked = printing or t.number != head_number %}
+  <div class="d-flex gap-2">
+    {{ action(url_for('staff_action', ticket_id=t.number, action='start'), 'Print', 'btn-sm btn-primary', 'Print ticket ' ~ t.number, view, blocked,
+              ('Ticket #' ~ printing.number ~ ' is still printing. Mark it as ready first.') if printing else ('Ticket #' ~ head_number ~ ' goes first.')) }}
+    {{ action(url_for('staff_action', ticket_id=t.number, action='cancel'), 'Cancel', 'btn-sm btn-outline-danger', 'Cancel ticket ' ~ t.number, view) }}
+  </div>
+{% elif t.status == 'ready' %}
+  <div class="d-flex">{{ action(url_for('staff_action', ticket_id=t.number, action='done'), 'Mark done', 'btn-sm btn-dark', 'Mark ticket ' ~ t.number ~ ' as done', view) }}</div>
+{% elif t.status == 'printing' %}
+  <span class="text-body-secondary">See printing now</span>
+{% else %}
+  <span class="text-body-secondary">No actions</span>
+{% endif %}
+{% endmacro %}
+
+{% macro details_modal(t) %}
+<div class="modal fade" id="details-{{ t.number }}" tabindex="-1" aria-labelledby="details-title-{{ t.number }}" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="details-title-{{ t.number }}">Print Details</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        {{ ticket_info(t) }}
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-primary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{% block content %}
+<h1 class="h3 mb-3 fw-bolder special-underline">Staff Dashboard</h1>
+
+{# Messages from changes made without reloading (script adds them here). #}
+<div id="alerts" aria-live="polite"></div>
+
+{# TODO #}
+<div id="dashboard" tabindex="-1">
+
+{# Counts by status. Each one is also the filter: click a count to list those requests. #}
+<nav aria-label="Requests by status" aria-describedby="filter-help" class="mb-4">
+  <p id="filter-help" class="text-body-secondary mb-2">Click a status chip to filter the print requests below.</p>
+  <div class="pq-chips">
+    {% for key, label in filters %}
+    {% set count = c['total' if key == 'all' else key] %}
+    <a class="pq-chip {{ chip_style[key] }} {% if key == view %}is-active{% endif %}"
+       href="{{ url_for('staff_dashboard', status=key) }}" {% if key == view %}aria-current="page"{% endif %}>
+      <span class="pq-count">{{ count }}</span><span>{{ 'All' if key == 'all' else label }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</nav>
+
+<div class="row g-4">
+  {# LEFT COLUMN SIDE #}
+  <div class="col-12 col-lg-5">
+    <h2 class="h5 fw-bold">Now Printing</h2>
+    <div class="card mb-3">
+      <div class="card-body p-3">
+        {% if printing %}{{ ticket_info(printing) }}
+        {% elif head_number is none %}
+            <p class="text-center text-body-secondary mb-0 py-3">Nothing to print, nobody in line. Enjoy the calm.</p>
+        {% else %}
+            <p class="text-center text-body-secondary mb-0 py-3">The printer is ready when you are. Press Print next to start.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Only the button that makes sense is shown. #}
+    {% if printing %}
+    {{ action(url_for('staff_action', ticket_id=printing.number, action='ready'), 'Mark as ready for pickup', 'btn-primary', 'Mark ticket ' ~ printing.number ~ ' as ready for pickup', view) }}
+    {% elif head_number is not none %}
+    <form method="post" action="{{ url_for('staff_call_next') }}">
+      <input type="hidden" name="view" value="{{ view }}">
+      <button type="submit" class="btn btn-primary w-100 fw-bolder">Print next (#{{ head_number }})</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {# RIGHT COLUMN SIDE #}
+  <div class="col-12 col-lg-7">
+    <h2 class="h5 fw-bold">{{ view_label }}{% if view != 'all' %} requests{% endif %}</h2>
+
+    {% if rows %}
+      {% set scroll_class = 'pq-scroll' if rows|length > 8 else '' %}
+      <div class="card mb-4">
+        <div class="table-responsive {{ scroll_class }}" tabindex="0" role="region" aria-label="{{ view_label }} requests. Scrolls sideways on small screens.">
+          <table class="table pq-table align-middle mb-0">
+            <caption class="visually-hidden">{{ view_label }} print requests in ticket order</caption>
+            <thead>
+              <tr><th scope="col">No.</th><th scope="col">Name</th><th scope="col">Details</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
+            </thead>
+            <tbody>
+              {% for t in rows %}
+              <tr>
+                <th scope="row">#{{ t.number }}</th>
+                <td>{{ t.name }}{% if t.number == head_number and not printing %} <span class="badge text-bg-light border">Next</span>{% endif %}</td>
+                <td><button class="btn btn-link p-0" type="button" data-bs-toggle="modal"
+                            data-bs-target="#details-{{ t.number }}" aria-label="View details for ticket {{ t.number }}">View Details</button></td>
+                <td><span class="badge {{ STATUS_BADGE[t.status] }}">{{ STATUS_LABELS[t.status] }}</span></td>
+                <td>{{ row_actions(t, view, printing, head_number) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="card mb-4"><div class="card-body text-center text-body-secondary p-4">
+        {% if view == 'waiting' %}No one is waiting. New requests will show up here in ticket order.
+        {% elif view == 'all' %}There are no requests yet.
+        {% else %}No {{ view_label|lower }} requests.{% endif %}
+      </div></div>
+    {% endif %}
+  </div>
+</div>
+
+{# Print Details windows, one per request in the list #}
+{% for t in rows %}{{ details_modal(t) }}{% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // NOTE:
+  // Staff dashboard: change a status without reloading the page.
+  // The buttons and links still work on their own (the server redirects back to /staff).
+  // Here the same request is sent with fetch(), then the new #dashboard from the reply is swapped in.
+  // If anything goes wrong, it falls back to the normal page reload.
+  (() => {
+    const dashboard = document.getElementById("dashboard");
+    const alertsBox = document.getElementById("alerts");
+
+    if (dashboard) {
+      let busy = false;
+      const modalOpen = () => document.querySelector(".modal.show") !== null;
+
+      // Put the new dashboard from a server reply on the page. Returns the address that was loaded.
+      async function swapIn(response, showMessages) {
+        if (!response.ok) throw new Error("bad reply " + response.status);
+        const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+        const fresh = doc.getElementById("dashboard");
+        if (!fresh) throw new Error("no dashboard in reply");
+
+        if (showMessages) alertsBox.replaceChildren(...doc.querySelectorAll("main > .alert"));
+
+        if (fresh.innerHTML !== dashboard.innerHTML) { // only touch the page when something changed
+          const left = dashboard.querySelector(".pq-chips")?.scrollLeft || 0;
+          dashboard.innerHTML = fresh.innerHTML;
+          const row = dashboard.querySelector(".pq-chips");
+          if (row) row.scrollLeft = left; // keep the count row where it was
+        }
+        return response.url;
+      }
+
+      // Print, Cancel, Mark done, Print next, Mark as ready
+      dashboard.addEventListener("submit", async (event) => {
+        const form = event.target;
+        if (!form.matches("form[method=post]") || busy) return;
+        event.preventDefault();
+        busy = true;
+        if (event.submitter) event.submitter.disabled = true; // no double clicks
+        try {
+          const url = await swapIn(await fetch(form.action, { method: "POST", body: new FormData(form) }), true);
+          history.replaceState(null, "", url);
+          dashboard.focus({ preventScroll: true });
+        } catch (err) {
+          form.submit(); // fall back to the normal reload
+        } finally {
+          busy = false;
+        }
+      });
+
+      // Choosing a status chip (the filter)
+      dashboard.addEventListener("click", async (event) => {
+        const link = event.target.closest("a.pq-chip");
+        if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        event.preventDefault();
+        try {
+          history.pushState(null, "", await swapIn(await fetch(link.href), false));
+          dashboard.focus({ preventScroll: true });
+        } catch (err) {
+          location.href = link.href;
+        }
+      });
+
+      window.addEventListener("popstate", async () => {
+        try { 
+            await swapIn(await fetch(location.href), false); 
+        } catch (err) { 
+            location.reload(); 
+        }
+      });
+
+      // NOTE: new requests show up by themselves: check again every 10 seconds.
+      async function refreshStatus() {
+        if (document.hidden || busy || modalOpen()) return;
+        try { await swapIn(await fetch(location.href), false); } catch (err) { /* try again next time */ }
+      }
+
+      setInterval(refreshStatus, 10000);
+    }
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="text-center py-5">
+  <h1 class="display-4 fw-bold mb-3 special-underline">Paprintco</h1>
+  <p class="lead text-body-secondary mx-auto mb-4" style="max-width: 36rem;">
+    Send your file and print settings, get a ticket, and watch your place in the
+    queue without waiting at the printing station.
+  </p>
+  <a class="btn btn-primary btn-lg fw-bolder" href="{{ url_for('join_form') }}">Request Print</a>
+</section>
+{% endblock %}
