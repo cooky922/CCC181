@@ -4,7 +4,7 @@ Run it with:
     flask --app app run --debug
 then open http://127.0.0.1:5000
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import os
 import re
 import uuid
@@ -78,21 +78,25 @@ CHIP_STYLE = {
     "all": "chip-all",
 }
 
-def get_ticket(ticket_id):
-    return db.session.get(Ticket, ticket_id)
+PH_TIME = timezone(timedelta(hours=8))  # Philippine time has no daylight saving
 
-def requests_ahead(ticket):
-    return db.session.scalar(
-        db.select(func.count(Ticket.id)).where(
-            Ticket.service_id == ticket.service_id,
-            Ticket.status == "waiting",
-            Ticket.id < ticket.id,
-        )
-    )
+@app.template_filter("local")
+def local_time(value):
+    """Show a database time in Philippine time, e.g. Nov 16, 08:01 AM."""
+    return value.astimezone(PH_TIME).strftime("%b %d, %I:%M %p") if value else ""
+
+def people_ahead(t):
+    """Count tickets still waiting for the same service that joined before t."""
+    stmt = (db.select(func.count())
+            .select_from(Ticket)
+            .where(Ticket.service_id == t.service_id,
+                   Ticket.status == "waiting",
+                   Ticket.created_at < t.created_at))
+    return db.session.scalar(stmt)
 
 def describe_ticket(ticket):
     status = ticket.status
-    ahead = requests_ahead(ticket) if status == "waiting" else 0
+    ahead = people_ahead(ticket) if status == "waiting" else 0
     match status:
         case "waiting":
             message = "You're next!" if ahead == 0 else (
@@ -109,6 +113,7 @@ def describe_ticket(ticket):
         "status": status,
         "label": STATUS_LABELS[status],
         "badge": STATUS_BADGE[status],
+        "color": STATUS_COLOR[status],
         "ahead": ahead,
         "message": message
     }
@@ -140,21 +145,18 @@ def index():
 
 @app.get("/queue/<int:ticket_id>")
 def ticket(ticket_id):
-    ticket = get_ticket(ticket_id)
-    if ticket is None:
-        abort(404)  # no ticket with that number
-    return render_template("ticket.html", 
-                           ticket=ticket, 
-                           info=describe_ticket(ticket),
-                           first_name=ticket.user.first_name,
+    t = db.get_or_404(Ticket, ticket_id)
+    return render_template("ticket.html",
+                           ticket=t,
+                           service=t.service,
+                           info=describe_ticket(t),
+                           first_name=t.user.first_name,
                            updated=clock())
 
 @app.get("/queue/<int:ticket_id>/status.json")
 def ticket_status(ticket_id):
-    ticket = get_ticket(ticket_id)
-    if ticket is None:
-        abort(404)
-    return jsonify({**describe_ticket(ticket), "updated": clock()})
+    t = db.get_or_404(Ticket, ticket_id)
+    return jsonify({**describe_ticket(t), "updated": clock()})
 
 @app.post("/queue/<int:ticket_id>/leave")
 def leave(ticket_id):
@@ -301,22 +303,28 @@ def join():
     flash(f"Request submitted. Your ticket is #{ticket.id}.", "success")
     return redirect(url_for("ticket", ticket_id=ticket.id))
 
-def get_status_count_table():
+def get_status_count_table(service_id=None):
     c = {key: 0 for key in STATUS_LABELS}
-    for t in TICKETS:
-        c[t["status"]] += 1
-    c["total"] = len(TICKETS)
+    stmt = db.select(Ticket.status, func.count()).group_by(Ticket.status)
+    if service_id:
+        stmt = stmt.where(Ticket.service_id == service_id)
+    for status, number in db.session.execute(stmt):
+        c[status] = number
+    c["total"] = sum(c.values())
     return c
 
 
 def waiting_list():
-    """Waiting requests in ticket order (oldest first)."""
-    return sorted((t for t in TICKETS if t["status"] == "waiting"), key=lambda t: t["number"])
+    """Waiting requests in the order they joined (oldest first)."""
+    stmt = (db.select(Ticket)
+            .where(Ticket.status == "waiting")
+            .order_by(Ticket.created_at, Ticket.id))
+    return db.session.scalars(stmt).all()
 
 
 def current_printing():
     """The one request being printed right now, or None."""
-    return next((t for t in TICKETS if t["status"] == "printing"), None)
+    return db.session.scalar(db.select(Ticket).where(Ticket.status == "printing"))
 
 
 @app.context_processor
@@ -332,20 +340,26 @@ def chosen_filter(value):
 @app.get("/staff")
 def staff_dashboard():
     view = chosen_filter(request.args.get("status"))
-    everyone = sorted(TICKETS, key=lambda t: t["number"])
-    rows = everyone if view == "all" else [t for t in everyone if t["status"] == view]
-    printing = current_printing()
+    service_id = request.args.get("service_id", type=int)
+    stmt = db.select(Ticket).order_by(Ticket.created_at, Ticket.id)
+    if view != "all":
+        stmt = stmt.where(Ticket.status == view)
+    if service_id:
+        stmt = stmt.where(Ticket.service_id == service_id)
+    rows = db.session.scalars(stmt).all()
     waiting = waiting_list()
     return render_template(
         "staff.html",
-        printing=printing,
+        printing=current_printing(),
         rows=rows,
         chip_style=CHIP_STYLE,
         filters=FILTERS,
         view=view,
         view_label=dict(FILTERS)[view],
-        head_number=waiting[0]["number"] if waiting else None,
-        c=get_status_count_table(),
+        head_number=waiting[0].id if waiting else None,
+        c=get_status_count_table(service_id),
+        services=all_services(),
+        selected=service_id,
     )
 
 def back_to_dashboard():
@@ -406,13 +420,13 @@ def staff_action(ticket_id, action):
 
 @app.get("/staff/tickets/<int:ticket_id>/file")
 def staff_file(ticket_id):
-    t = get_ticket(ticket_id)
-    if t is None or not t.get("file_path"):
+    t = db.get_or_404(Ticket, ticket_id)
+    if not saved_pdf(t.stored_name):
         abort(404)
-    return send_from_directory(UPLOAD_DIR, 
-                               os.path.basename(t["file_path"]),
-                               as_attachment=True, 
-                               download_name=t["file_name"])
+    return send_from_directory(UPLOAD_DIR,
+                               t.stored_name,
+                               as_attachment=True,
+                               download_name=t.file_name)
 
 @app.errorhandler(RequestEntityTooLarge)
 def too_large(_err):

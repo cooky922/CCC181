@@ -6,11 +6,11 @@
 <dl class="row mb-0">
   <dt class="col-5">File</dt>
   <dd class="col-7 text-truncate" title="{{ t.file_name }}">
-    {% if t.file_path %}<a href="{{ url_for('staff_file', ticket_id=t.id) }}" aria-label="Download file for ticket {{ t.id }}">{{ t.file_name }}</a>
+    {% if t.stored_name %}<a href="{{ url_for('staff_file', ticket_id=t.id) }}" aria-label="Download file for ticket {{ t.id }}">{{ t.file_name }}</a>
     {% else %}{{ t.file_name }}{% endif %}
   </dd>
   <dt class="col-5">Color mode</dt><dd class="col-7">{{ t.color_mode }}</dd>
-  <dt class="col-5">Copies</dt><dd class="col-7">{{ t.id_of_copies }}</dd>
+  <dt class="col-5">Copies</dt><dd class="col-7">{{ t.copies }}</dd>
   <dt class="col-5">Paper type</dt><dd class="col-7">{{ t.paper_type }}</dd>
   <dt class="col-5">Paper size</dt><dd class="col-7 {% if not t.notes %}mb-0{% endif %}">{{ t.paper_size }}</dd>
   {% if t.notes %}<dt class="col-5">Notes</dt><dd class="col-7 mb-0">{{ t.notes }}</dd>{% endif %}
@@ -21,7 +21,8 @@
 {% macro ticket_info(t) %}
 <dl class="row mb-0">
   <dt class="col-5">Ticket number</dt><dd class="col-7">#{{ t.id }}</dd>
-  <dt class="col-5">Requester</dt><dd class="col-7">{{ t.name }}</dd>
+  <dt class="col-5">Requester</dt><dd class="col-7">{{ t.user.first_name }} {{ t.user.last_name }}</dd>
+  <dt class="col-5">Joined</dt><dd class="col-7">{{ t.created_at|local }}</dd>
   <dt class="col-5">Status</dt><dd class="col-7 mb-0"><span class="badge {{ STATUS_BADGE[t.status] }}">{{ STATUS_LABELS[t.status] }}</span></dd>
 </dl>
 <hr>
@@ -89,7 +90,7 @@
     {% for key, label in filters %}
     {% set count = c['total' if key == 'all' else key] %}
     <a class="pq-chip {{ chip_style[key] }} {% if key == view %}is-active{% endif %}"
-       href="{{ url_for('staff_dashboard', status=key) }}" {% if key == view %}aria-current="page"{% endif %}>
+       href="{{ url_for('staff_dashboard', status=key, service_id=selected) }}" {% if key == view %}aria-current="page"{% endif %}>
       <span class="pq-count">{{ count }}</span><span>{{ 'All' if key == 'all' else label }}</span>
     </a>
     {% endfor %}
@@ -133,13 +134,14 @@
           <table class="table pq-table align-middle mb-0">
             <caption class="visually-hidden">{{ view_label }} print requests in ticket order</caption>
             <thead>
-              <tr><th scope="col">No.</th><th scope="col">Name</th><th scope="col">Details</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
+              <tr><th scope="col">No.</th><th scope="col">Name</th><th scope="col">Joined</th><th scope="col">Details</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
             </thead>
             <tbody>
               {% for t in rows %}
               <tr>
                 <th scope="row">#{{ t.id }}</th>
-                <td>{{ t.name }}{% if t.id == head_number and not printing %} <span class="badge text-bg-light border">Next</span>{% endif %}</td>
+                <td>{{ t.user.first_name }} {{ t.user.last_name }}{% if t.id == head_number and not printing %} <span class="badge text-bg-light border">Next</span>{% endif %}</td>
+                <td class="text-nowrap">{{ t.created_at|local }}</td>
                 <td><button class="btn btn-link p-0" type="button" data-bs-toggle="modal"
                             data-bs-target="#details-{{ t.id }}" aria-label="View details for ticket {{ t.id }}">View Details</button></td>
                 <td><span class="badge {{ STATUS_BADGE[t.status] }}">{{ STATUS_LABELS[t.status] }}</span></td>

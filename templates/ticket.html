@@ -25,6 +25,8 @@
     <div class="card mb-4">
       <div class="card-body">
         <dl class="row mb-0">
+          <dt class="col-5 col-sm-4">Service</dt><dd class="col-7 col-sm-8">{{ service.name }}</dd>
+          <dt class="col-5 col-sm-4">Joined</dt><dd class="col-7 col-sm-8">{{ ticket.created_at|local }}</dd>
           <dt class="col-5 col-sm-4">File</dt><dd class="col-7 col-sm-8 text-break">{{ ticket.file_name }}</dd>
           <dt class="col-5 col-sm-4">Color mode</dt><dd class="col-7 col-sm-8">{{ ticket.color_mode }}</dd>
           <dt class="col-5 col-sm-4">Copies</dt><dd class="col-7 col-sm-8">{{ ticket.copies }}</dd>
