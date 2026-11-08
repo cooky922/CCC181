@@ -426,5 +426,16 @@ def too_large(_err):
 def page_not_found(error):
     return render_template("404.html"), 404
 
+@app.cli.command("seed")
+def seed():
+    """Add the starting services if they are not there yet."""
+    starting = [("Printing")]
+    for name in starting:
+        exists = db.session.scalar(db.select(Service).filter_by(name=name))
+        if exists is None:
+            db.session.add(Service(name=name))
+    db.session.commit()
+    print("Services are ready.")
+
 if __name__ == "__main__":
     app.run(debug=True)
