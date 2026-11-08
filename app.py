@@ -8,9 +8,15 @@ from datetime import datetime
 import os
 import re
 import uuid
+from dotenv import load_dotenv
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for, send_from_directory
+from flask_migrate import Migrate
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
+
+from models import Service, Ticket, User, db
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
@@ -18,9 +24,16 @@ SAVED_PDF = re.compile(r"^[0-9a-f]{32}\.pdf$")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+load_dotenv()
+
 app = Flask(__name__)
 app.secret_key = "dev-only-change-me"  # Week 11 moves this into an environment variable
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # Max of 16 MB per upload
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ["DATABASE_URL"]
+app.config["SQLALCHEMY_ECHO"] = os.environ.get("SQLALCHEMY_ECHO") == "1"
+
+db.init_app(app)
+migrate = Migrate(app, db)
 
 SERVICES = [
     {"id": 1, "name": "Document Printing"},
