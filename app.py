@@ -35,45 +35,10 @@ app.config["SQLALCHEMY_ECHO"] = os.environ.get("SQLALCHEMY_ECHO") == "1"
 db.init_app(app)
 migrate = Migrate(app, db)
 
-SERVICES = [
-    {"id": 1, "name": "Document Printing"},
-]
-
 # Choices for the request form. The server checks every value against these lists.
 COLOR_MODES = ["Grayscale", "Colored"]
 PAPER_TYPES = ["Bond Paper", "Photo Paper", "Sticker Paper", "Cardstock"]
 PAPER_SIZES = ["Short", "A4", "Long"]
-
-# Sample data for the demo. It lives in memory, so it resets every time the
-# server restarts. A real app would save tickets in a database later.
-TICKETS = [
-    {
-        "number": 1,
-        "name": "Desmond Gold",
-        "service_id": 1,
-        "file_name": "assignment.pdf",
-        "file_path": None,
-        "number_of_copies": 3,
-        "paper_size": "A4",
-        "paper_type": "Bond Paper",
-        "color_mode": "Grayscale",
-        "notes": "",
-        "status": "printing",
-    },
-    {
-        "number": 2,
-        "name": "Lex Ian",
-        "service_id": 1,
-        "file_name": "report.pdf",
-        "file_path": None,
-        "number_of_copies": 1,
-        "paper_size": "Long",
-        "paper_type": "Bond Paper",
-        "color_mode": "Colored",
-        "notes": "",
-        "status": "waiting",
-    },
-]
 
 # Status words, badge styles and tracker steps for the My Place page.
 STATUS_LABELS = {
@@ -113,17 +78,20 @@ CHIP_STYLE = {
     "all": "chip-all",
 }
 
-def get_ticket(number):
-    return next((ticket for ticket in TICKETS if ticket["number"] == number), None)
+def get_ticket(ticket_id):
+    return db.session.get(Ticket, ticket_id)
 
 def requests_ahead(ticket):
-    return sum(1 for x in TICKETS
-               if x["service_id"] == ticket["service_id"]
-               and x["status"] == "waiting"
-               and x["number"] < ticket["number"])
+    return db.session.scalar(
+        db.select(func.count(Ticket.id)).where(
+            Ticket.service_id == ticket.service_id,
+            Ticket.status == "waiting",
+            Ticket.id < ticket.id,
+        )
+    )
 
 def describe_ticket(ticket):
-    status = ticket["status"]
+    status = ticket.status
     ahead = requests_ahead(ticket) if status == "waiting" else 0
     match status:
         case "waiting":
@@ -145,12 +113,20 @@ def describe_ticket(ticket):
         "message": message
     }
 
+def all_services():
+    return db.session.scalars(db.select(Service).order_by(Service.name)).all()
+
+def clean_name(text):
+    """Remove extra spaces and capitalize each part: '  maria   dela CRUZ ' -> 'Maria Dela Cruz'."""
+    return " ".join(text.split()).title()
+
 def clock():
     return datetime.now().strftime("%I:%M %p").lstrip("0")
 
 def form_context(form, errors, pending = None):
     return dict(form=form, 
                 errors=errors,
+                services=all_services(),
                 pending=pending,
                 color_modes=COLOR_MODES,
                 paper_types=PAPER_TYPES, 
@@ -170,7 +146,7 @@ def ticket(ticket_id):
     return render_template("ticket.html", 
                            ticket=ticket, 
                            info=describe_ticket(ticket),
-                           first_name=ticket["name"].split()[0],
+                           first_name=ticket.user.first_name,
                            updated=clock())
 
 @app.get("/queue/<int:ticket_id>/status.json")
@@ -223,7 +199,10 @@ def join_form():
 @app.post("/join")
 def join():
     form = request.form
-    name = form.get("name", "").strip()
+    first_name = clean_name(form.get("first_name", ""))
+    last_name = clean_name(form.get("last_name", ""))
+    service_id = form.get("service_id", type=int)
+    service = db.session.get(Service, service_id) if service_id else None
     color_mode = form.get("color_mode", "")
     copies = form.get("number_of_copies", type=int)
     paper_type = form.get("paper_type", "")
@@ -235,10 +214,16 @@ def join():
     file_label = form.get("pending_label", "")[:120] if kept_name else ""
 
     errors = {}
-    if not name:
-        errors["name"] = "Enter your name."
-    elif len(name) > 60:
-        errors["name"] = "Keep your name under 60 characters."
+    if not first_name:
+        errors["first_name"] = "Enter your first name."
+    elif len(first_name) > 60:
+        errors["first_name"] = "Keep your first name under 60 characters."
+    if not last_name:
+        errors["last_name"] = "Enter your last name."
+    elif len(last_name) > 60:
+        errors["last_name"] = "Keep your last name under 60 characters."
+    if service is None:
+        errors["service_id"] = "Choose a service."
 
     # Check whether the user selected a NEW file.
     # An empty filename means no new file was selected.
@@ -282,27 +267,39 @@ def join():
     if len(notes) > 300:
         errors["notes"] = "Keep additional instructions under 300 characters."
 
+    pending = {"file": stored_name, "label": file_label} if stored_name else None
+
     if errors:
         flash("Please fix the highlighted fields.", "danger")
-        pending = {"file": stored_name, "label": file_label} if stored_name else None
         return render_template("join.html", **form_context(form, errors, pending)), 400
 
-    number = TICKETS[-1]["number"] + 1 if TICKETS else 1
-    TICKETS.append({
-        "number": number,
-        "name": name,
-        "service_id": SERVICES[0]["id"],
-        "file_name": file_label,
-        "file_path": f"uploads/{stored_name}",
-        "number_of_copies": copies,
-        "paper_size": paper_size,
-        "paper_type": paper_type,
-        "color_mode": color_mode,
-        "notes": notes,
-        "status": "waiting",
-    })
-    flash(f"Request submitted. Your ticket is #{number}.", "success")
-    return redirect(url_for("ticket", ticket_id=number))
+    # Same first and last name (any capitalization) is the same person.
+    user = db.session.scalar(
+        db.select(User).filter_by(first_name=first_name, last_name=last_name)
+    )
+    if user is None:
+        user = User(first_name=first_name, last_name=last_name)
+    ticket = Ticket(
+        user=user,
+        service=service,
+        file_name=file_label,
+        stored_name=stored_name,
+        color_mode=color_mode,
+        copies=copies,
+        paper_type=paper_type,
+        paper_size=paper_size,
+        notes=notes or None,
+    )
+    db.session.add(ticket)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("Something went wrong saving your request. Please try again.", "danger")
+        return render_template("join.html", **form_context(form, {}, pending)), 409
+
+    flash(f"Request submitted. Your ticket is #{ticket.id}.", "success")
+    return redirect(url_for("ticket", ticket_id=ticket.id))
 
 def get_status_count_table():
     c = {key: 0 for key in STATUS_LABELS}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Ticket #{{ ticket.number }} · Paprintco{% endblock %}
+{% block title %}Ticket #{{ ticket.id }} · Paprintco{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
@@ -11,9 +11,9 @@
     <div class="card text-center mb-4">
       <div class="card-body p-4">
         <p class="text-body-secondary mb-0">Your Ticket</p>
-        <p id="ticket-number" class="display-1 fw-bold {{ STATUS_COLOR[ticket.status] }} smb-2 ticket-number" aria-label="Ticket number {{ ticket.number }}">#{{ ticket.number }}</p>
+        <p id="ticket-number" class="display-1 fw-bold {{ STATUS_COLOR[ticket.status] }} smb-2 ticket-number" aria-label="Ticket number {{ ticket.id }}">#{{ ticket.id }}</p>
 
-        <div id="live-status" aria-live="polite" data-url="{{ url_for('ticket_status', ticket_id=ticket.number) }}">
+        <div id="live-status" aria-live="polite" data-url="{{ url_for('ticket_status', ticket_id=ticket.id) }}">
           <span id="status-badge" class="badge rounded-pill fs-5 px-4 py-2 {{ info.badge }}">{{ info.label }}</span>
           <p id="position-text" class="fs-4 fw-semibold mt-3 mb-0">{{ info.message }}</p>
         </div>
@@ -27,7 +27,7 @@
         <dl class="row mb-0">
           <dt class="col-5 col-sm-4">File</dt><dd class="col-7 col-sm-8 text-break">{{ ticket.file_name }}</dd>
           <dt class="col-5 col-sm-4">Color mode</dt><dd class="col-7 col-sm-8">{{ ticket.color_mode }}</dd>
-          <dt class="col-5 col-sm-4">Copies</dt><dd class="col-7 col-sm-8">{{ ticket.number_of_copies }}</dd>
+          <dt class="col-5 col-sm-4">Copies</dt><dd class="col-7 col-sm-8">{{ ticket.copies }}</dd>
           <dt class="col-5 col-sm-4">Paper type</dt><dd class="col-7 col-sm-8">{{ ticket.paper_type }}</dd>
           <dt class="col-5 col-sm-4">Paper size</dt><dd class="col-7 col-sm-8 {% if not ticket.notes %}mb-0{% endif %}">{{ ticket.paper_size }}</dd>
           {% if ticket.notes %}
@@ -54,7 +54,7 @@
             <div class="modal-body">You will lose your place in the queue. You can send a new request anytime.</div>
             <div class="modal-footer">
               <button type="button" class="btn btn-outline-primary" data-bs-dismiss="modal">Keep request</button>
-              <form method="post" action="{{ url_for('leave', ticket_id=ticket.number) }}">
+              <form method="post" action="{{ url_for('leave', ticket_id=ticket.id) }}">
                 <button type="submit" class="btn btn-danger">Yes, cancel request</button>
               </form>
             </div>
@@ -71,7 +71,7 @@
 {% block scripts %}
 <script>
   (() => {
-    const statusUrl = "{{ url_for('ticket_status', ticket_id=ticket.number) }}";
+    const statusUrl = "{{ url_for('ticket_status', ticket_id=ticket.id) }}";
 
     const ticketNumber = document.getElementById("ticket-number");
     const badge = document.getElementById("status-badge");
