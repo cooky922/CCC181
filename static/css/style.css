@@ -165,3 +165,14 @@ a.nav-link:focus-visible,
 
   .btn.btn-sm { min-height: var(--pq-tap-size); } 
 }
+
+/* Manage services: from 5 services on, the rows scroll and the heading stays */
+.services-scroll {
+  max-height: 19rem;
+  overflow-y: auto;
+}
+.services-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}

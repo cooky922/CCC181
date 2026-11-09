@@ -20,7 +20,7 @@ if (joinForm) {
   });
 }
 
-// Clean the name fields when the user leaves something like: "  maria   DELA cruz " -> "Maria Dela Cruz".
+// Tidy the name fields when the user leaves them: "  maria   DELA cruz " -> "Maria Dela Cruz".
 // The server does the same again, so this is only a preview for the user.
 document.querySelectorAll("[data-clean-name]").forEach((input) => {
   input.addEventListener("blur", () => {
@@ -31,3 +31,36 @@ document.querySelectorAll("[data-clean-name]").forEach((input) => {
       .replace(/(^|[^\p{L}])(\p{L})/gu, (_, before, letter) => before + letter.toUpperCase());
   });
 });
+
+
+let formToConfirm = null;
+document.addEventListener("submit", (event) => {
+  const form = event.target.closest("form[data-confirm]");
+  if (!form || form.dataset.confirmed === "yes") return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  const popup = document.getElementById("confirmModal");
+  if (!popup || !window.bootstrap) {
+    if (confirm(form.dataset.confirm)) { form.dataset.confirmed = "yes"; form.requestSubmit(); delete form.dataset.confirmed; }
+    return;
+  }
+  formToConfirm = form;
+  document.getElementById("confirmModalBody").textContent = form.dataset.confirm;
+  document.getElementById("confirmModalYes").textContent = form.dataset.confirmLabel || "Delete";
+  bootstrap.Modal.getOrCreateInstance(popup).show();
+}, true);
+
+const confirmYes = document.getElementById("confirmModalYes");
+if (confirmYes) {
+  confirmYes.addEventListener("click", () => {
+    const form = formToConfirm;
+    formToConfirm = null;
+    bootstrap.Modal.getInstance(document.getElementById("confirmModal")).hide();
+    if (form) {
+      form.dataset.confirmed = "yes";
+      form.requestSubmit();
+      delete form.dataset.confirmed;
+    }
+  });
+}

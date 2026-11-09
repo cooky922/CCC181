@@ -1,7 +1,18 @@
 from datetime import datetime
 
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    CheckConstraint, 
+    DateTime, 
+    ForeignKey, 
+    Index, 
+    String, 
+    Text, 
+    UniqueConstraint, 
+    func, 
+    text, 
+    true
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 db = SQLAlchemy()
@@ -35,6 +46,7 @@ class Service(db.Model):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
+    active: Mapped[bool] = mapped_column(default=True, server_default=true())
 
     tickets: Mapped[list["Ticket"]] = relationship(
         back_populates="service", 

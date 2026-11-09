@@ -121,6 +121,18 @@ def describe_ticket(ticket):
 def all_services():
     return db.session.scalars(db.select(Service).order_by(Service.name)).all()
 
+def active_services():
+    stmt = db.select(Service).filter_by(active=True).order_by(Service.name)
+    return db.session.scalars(stmt).all()
+
+def delete_pdf(t):
+    """Delete the ticket's PDF from the server and forget its name (FR-12)."""
+    if t.stored_name:
+        path = os.path.join(UPLOAD_DIR, t.stored_name)
+        if os.path.exists(path):
+            os.remove(path)
+        t.stored_name = None
+
 def clean_name(text):
     """Remove extra spaces and capitalize each part: '  maria   dela CRUZ ' -> 'Maria Dela Cruz'."""
     return " ".join(text.split()).title()
@@ -131,7 +143,7 @@ def clock():
 def form_context(form, errors, pending = None):
     return dict(form=form, 
                 errors=errors,
-                services=all_services(),
+                services=active_services(),
                 pending=pending,
                 color_modes=COLOR_MODES,
                 paper_types=PAPER_TYPES, 
@@ -160,13 +172,14 @@ def ticket_status(ticket_id):
 
 @app.post("/queue/<int:ticket_id>/leave")
 def leave(ticket_id):
-    ticket = get_ticket(ticket_id)
-    if ticket is None:
-        abort(404)
-    if ticket["status"] != "waiting":
+    t = db.get_or_404(Ticket, ticket_id)
+    if t.status != "waiting":
         flash("Only a request that is still waiting can be cancelled.", "warning")
         return redirect(url_for("ticket", ticket_id=ticket_id))
-    ticket["status"] = "cancelled"
+    t.status = "cancelled"  # soft delete: the row stays for reports
+    t.finished_at = func.now()
+    delete_pdf(t)
+    db.session.commit()
     flash(f"Request #{ticket_id} was cancelled. You can send a new request anytime.", "info")
     return redirect(url_for("index"))
 
@@ -224,8 +237,12 @@ def join():
         errors["last_name"] = "Enter your last name."
     elif len(last_name) > 60:
         errors["last_name"] = "Keep your last name under 60 characters."
-    if service is None:
+    if not active_services():
+        errors["service_id"] = "No service is active right now. Please try again later."
+    elif service is None:
         errors["service_id"] = "Choose a service."
+    elif not service.active:
+        errors["service_id"] = "That service is not available anymore. Choose another one."
 
     # Check whether the user selected a NEW file.
     # An empty filename means no new file was selected.
@@ -367,18 +384,26 @@ def back_to_dashboard():
     return redirect(url_for("staff_dashboard", status=chosen_filter(request.form.get("view"))))
 
 def start_printing(ticket_id=None):
-    """Move the oldest waiting request to printing. Returns True if it started."""
+    """Move the oldest waiting request to printing."""
     waiting = waiting_list()
     busy = current_printing()
     if busy:
-        flash(f"Ticket #{busy['number']} is still printing. Mark it as ready first.", "warning")
+        flash(f"Ticket #{busy.id} is still printing. Mark it as ready first.", "warning")
     elif not waiting:
         flash("No one is waiting.", "info")
-    elif ticket_id is not None and waiting[0]["number"] != ticket_id:
-        flash(f"First come, first served: ticket #{waiting[0]['number']} goes first.", "warning")
+    elif ticket_id is not None and waiting[0].id != ticket_id:
+        flash(f"First come, first served: ticket #{waiting[0].id} goes first.", "warning")
     else:
-        waiting[0]["status"] = "printing"
-        flash(f"Ticket #{waiting[0]['number']} is now printing.", "info")
+        t = waiting[0]
+        t.status = "printing"
+        t.printing_at = func.now()  # the database fills in the time
+        try:
+            db.session.commit()
+            flash(f"Ticket #{t.id} is now printing.", "info")
+        except IntegrityError:
+            # Two staff clicked at once: the database allows only one printing ticket.
+            db.session.rollback()
+            flash("Another request is already printing.", "warning")
 
 @app.post("/staff/call-next")
 def staff_call_next():
@@ -387,11 +412,10 @@ def staff_call_next():
 
 @app.post("/staff/tickets/<int:ticket_id>/<action>")
 def staff_action(ticket_id, action):
-    # Data-changing actions use POST, and the server re-checks every rule.
-    t = get_ticket(ticket_id)
-    if t is None or action not in ("start", "ready", "done", "cancel"):
+    if action not in ("start", "ready", "done", "cancel"):
         abort(404)
-    status = t["status"]
+    t = db.get_or_404(Ticket, ticket_id)
+    status = t.status
 
     if action == "start":
         if status != "waiting":
@@ -402,20 +426,38 @@ def staff_action(ticket_id, action):
         if status != "printing":
             flash("Only the request that is printing can be marked ready.", "warning")
         else:
-            t["status"] = "ready"
+            t.status = "ready"
+            t.ready_at = func.now()
+            db.session.commit()
             flash(f"Ticket #{ticket_id} is ready for pickup.", "success")
     elif action == "done":
         if status != "ready":
             flash("Only a ready request can be marked done.", "warning")
         else:
-            t["status"] = "done"
+            t.status = "done"
+            t.finished_at = func.now()
+            delete_pdf(t)
+            db.session.commit()
             flash(f"Ticket #{ticket_id} is done.", "success")
     else:  # cancel
         if status != "waiting":
             flash("Only a waiting request can be cancelled.", "warning")
         else:
-            t["status"] = "cancelled"
+            t.status = "cancelled"
+            t.finished_at = func.now()
+            delete_pdf(t)
+            db.session.commit()
             flash(f"Ticket #{ticket_id} was cancelled.", "info")
+    return back_to_dashboard()
+
+@app.post("/staff/tickets/<int:ticket_id>/delete")
+def delete_ticket(ticket_id):
+    """Hard delete: the PDF goes first, then the ticket row. The user row stays."""
+    t = db.get_or_404(Ticket, ticket_id)
+    delete_pdf(t)
+    db.session.delete(t)
+    db.session.commit()
+    flash(f"Ticket #{ticket_id} was deleted.", "warning")
     return back_to_dashboard()
 
 @app.get("/staff/tickets/<int:ticket_id>/file")
@@ -427,6 +469,61 @@ def staff_file(ticket_id):
                                t.stored_name,
                                as_attachment=True,
                                download_name=t.file_name)
+
+def clean_service_name(text):
+    return " ".join(text.split())
+
+@app.get("/staff/services/services.json")
+def services_json():
+    return jsonify([{"id": s.id, "name": s.name} for s in active_services()])
+
+@app.get("/staff/services")
+def services_list():
+    return render_template("services.html", services=all_services())
+
+@app.post("/staff/services")
+def service_create():
+    name = clean_service_name(request.form.get("name", ""))
+    if not name or len(name) > 100:
+        flash("Enter a service name (up to 100 characters).", "danger")
+        return redirect(url_for("services_list"))
+    db.session.add(Service(name=name))
+    try:
+        db.session.commit()
+        flash(f"Service \"{name}\" added.", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash(f"A service named \"{name}\" already exists.", "danger")
+    return redirect(url_for("services_list"))
+
+@app.post("/staff/services/<int:service_id>/edit")
+def service_edit(service_id):
+    s = db.get_or_404(Service, service_id)
+    name = clean_service_name(request.form.get("name", ""))
+    if not name or len(name) > 100:
+        flash("Enter a service name (up to 100 characters).", "danger")
+        return redirect(url_for("services_list"))
+    s.name = name
+    s.active = request.form.get("active") == "on"  # an unticked box is not sent at all
+    try:
+        db.session.commit()
+        flash(f"Service \"{name}\" updated.", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash(f"A service named \"{name}\" already exists.", "danger")
+    return redirect(url_for("services_list"))
+
+@app.post("/staff/services/<int:service_id>/delete")
+def service_delete(service_id):
+    s = db.get_or_404(Service, service_id)
+    name = s.name
+    if s.tickets:
+        flash(f"\"{name}\" has tickets, so it cannot be deleted. Turn it off instead.", "danger")
+        return redirect(url_for("services_list"))
+    db.session.delete(s)
+    db.session.commit()
+    flash(f"Service \"{name}\" deleted.", "warning")
+    return redirect(url_for("services_list"))
 
 @app.errorhandler(RequestEntityTooLarge)
 def too_large(_err):
