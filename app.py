@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for, send_from_directory
 from flask_migrate import Migrate
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
@@ -21,6 +21,7 @@ from models import Service, Ticket, User, db
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 SAVED_PDF = re.compile(r"^[0-9a-f]{32}\.pdf$")
+MAX_ID = 2147483647  # the biggest number an integer column can hold
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -207,6 +208,11 @@ def pending_upload(name):
     response.headers["Cache-Control"] = "no-store"
     return response
 
+@app.get("/services.json")
+def services_json():
+    """The services people can choose right now. The join page asks for this every 10 seconds."""
+    return jsonify([{"id": s.id, "name": s.name} for s in active_services()])
+
 @app.get("/join")
 def join_form():
     return render_template("join.html", **form_context({}, {}))
@@ -217,9 +223,9 @@ def join():
     first_name = clean_name(form.get("first_name", ""))
     last_name = clean_name(form.get("last_name", ""))
     service_id = form.get("service_id", type=int)
-    service = db.session.get(Service, service_id) if service_id else None
+    service = db.session.get(Service, service_id) if service_id and 0 < service_id <= MAX_ID else None
     color_mode = form.get("color_mode", "")
-    copies = form.get("number_of_copies", type=int)
+    copies = form.get("copies", type=int)
     paper_type = form.get("paper_type", "")
     paper_size = form.get("paper_size", "")
     notes = form.get("notes", "").strip()
@@ -252,6 +258,9 @@ def join():
         if not upload.filename.lower().endswith(".pdf"):
             errors["file"] = "Only PDF files are accepted. Save or export your file as a PDF first."
 
+        elif len(secure_filename(upload.filename)) > 255:
+            errors["file"] = "That file name is too long. Rename it to under 255 characters."
+
         elif upload.stream.read(5) != b"%PDF-":
             errors["file"] = "That file does not look like a valid PDF. Try exporting it again."
 
@@ -278,7 +287,7 @@ def join():
     if color_mode not in COLOR_MODES:
         errors["color_mode"] = "Choose Grayscale or Colored."
     if copies is None or not 1 <= copies <= 100:
-        errors["number_of_copies"] = "Enter a number of copies from 1 to 100."
+        errors["copies"] = "Enter a number of copies from 1 to 100."
     if paper_type not in PAPER_TYPES:
         errors["paper_type"] = "Choose a paper type."
     if paper_size not in PAPER_SIZES:
@@ -289,7 +298,10 @@ def join():
     pending = {"file": stored_name, "label": file_label} if stored_name else None
 
     if errors:
-        flash("Please fix the highlighted fields.", "danger")
+        if active_services():
+            flash("Please fix the highlighted fields.", "danger")
+        else:
+            flash("No service is available right now. Come back later.", "danger")
         return render_template("join.html", **form_context(form, errors, pending)), 400
 
     # Same first and last name (any capitalization) is the same person.
@@ -330,7 +342,6 @@ def get_status_count_table(service_id=None):
     c["total"] = sum(c.values())
     return c
 
-
 def waiting_list():
     """Waiting requests in the order they joined (oldest first)."""
     stmt = (db.select(Ticket)
@@ -338,11 +349,9 @@ def waiting_list():
             .order_by(Ticket.created_at, Ticket.id))
     return db.session.scalars(stmt).all()
 
-
 def current_printing():
     """The one request being printed right now, or None."""
     return db.session.scalar(db.select(Ticket).where(Ticket.status == "printing"))
-
 
 @app.context_processor
 def inject_status_words():
@@ -351,7 +360,6 @@ def inject_status_words():
             "STATUS_COLOR": STATUS_COLOR}
 
 def chosen_filter(value):
-    """Only known filter names are accepted; anything else falls back to Waiting."""
     return value if value in dict(FILTERS) else "waiting"
 
 @app.get("/staff")
@@ -412,6 +420,7 @@ def staff_call_next():
 
 @app.post("/staff/tickets/<int:ticket_id>/<action>")
 def staff_action(ticket_id, action):
+    # Data-changing actions use POST, and the server re-checks every rule.
     if action not in ("start", "ready", "done", "cancel"):
         abort(404)
     t = db.get_or_404(Ticket, ticket_id)
@@ -473,10 +482,6 @@ def staff_file(ticket_id):
 def clean_service_name(text):
     return " ".join(text.split())
 
-@app.get("/staff/services/services.json")
-def services_json():
-    return jsonify([{"id": s.id, "name": s.name} for s in active_services()])
-
 @app.get("/staff/services")
 def services_list():
     return render_template("services.html", services=all_services())
@@ -529,6 +534,12 @@ def service_delete(service_id):
 def too_large(_err):
     flash("That file is too large. The limit is 16 MB.", "danger")
     return render_template("join.html", **form_context({}, {"file": "Choose a PDF under 16 MB."})), 413
+
+@app.errorhandler(DataError)
+def value_out_of_range(_err):
+    """A number too big for an integer column (for example /queue/99999999999) is just a missing page."""
+    db.session.rollback()
+    return render_template("404.html"), 404
 
 @app.errorhandler(404)
 def page_not_found(error):

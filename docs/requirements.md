@@ -16,7 +16,7 @@ A ★ marks a requirement that is specific to printing.
  
 | ID | Requirement | Priority | Stores data? | Status |
 | --- | --- | --- | --- | --- |
-| FR-01 | A requester can submit their name, one PDF file and its print specifications (color mode, copies, paper type, paper size and instructions). | Must | Yes | Built (Week 3) |
+| FR-01 | A requester can submit their first name, last name, a service, one PDF file and its print specifications (color mode, copies, paper type, paper size and instructions). | Must | Yes | Built (Week 3) |
 | FR-02 | A requester can receive a ticket number after submitting their print request. | Must | Yes | Built (Week 3) |
 | FR-03 | A requester can see how many requests are ahead of theirs and the current status of their print request. | Must | Yes | Built (Week 3) |
 | FR-04 | A requester can see their queue position and status being updated automatically on their ticket page. | Should | No | Built (Week 3) |
@@ -36,7 +36,7 @@ A ★ marks a requirement that is specific to printing.
 | FR-18 ★ | A staff member can mark printing as unavailable with a reason (out of ink or out of paper), and a requester sees the notice and cannot submit a request until printing is available again. | Should | Yes | Later |
 | FR-19 ★ | A requester can print up to 20 pages per week, and further requests are refused once that limit is reached. | Could | Yes | Later |
 | FR-20 ★ | A staff member can place a request in the short-document queue or the long-document queue when there are two printers. | Could | Yes | Later |
-| FR-21 | A requester can request other services besides printing, such as photocopying a physicaly copy of document or just getting blank paper. | Could | Yes | Later |
+| FR-21 | A requester can request other services besides printing, such as photocopying a physical document or getting blank paper. | Could | Yes | Later |
  
 ## Non-functional requirements
 
