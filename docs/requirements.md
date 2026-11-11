@@ -58,7 +58,7 @@ A ★ marks a requirement that is specific to printing.
  
 ## MVP and out of scope
 
-**MVP:** FR-01, FR-02, FR-03, FR-04, FR-05, FR-06, FR-07, FR-08, FR-09, FR-10, FR-11, FR-17, NFR-03, NFR-04, NFR-05, NFR-10, NFR-11, NFR-12.
+**MVP:** FR-01, FR-02, FR-03, FR-04, FR-05, FR-06, FR-07, FR-08, FR-09, FR-10, FR-11, FR-12, FR-13, FR-14, FR-17, NFR-03, NFR-04, NFR-05, NFR-10, NFR-11, NFR-12.
  
 This is the smallest useful version because a request can go all the way from submission to pickup, in first-come first-served order, with one request printing at a time and nothing lost on a restart. Everything else makes the app easier to use or cleaner to run, but the queue works without it.
  

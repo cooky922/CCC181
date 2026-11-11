@@ -2,7 +2,10 @@
 {% block title %}Manage Services · Paprintco{% endblock %}
 
 {% block content %}
-<style>[hidden] { display: none !important; }</style>
+<style>
+  [hidden] { display: none !important; }
+  .form-check-input:disabled ~ .form-check-label { opacity: 1; color: inherit; }
+</style>
 
 <div class="d-flex flex-column flex-sm-row justify-content-sm-between align-items-start align-items-sm-center gap-2 mb-3">
   <h1 class="h3 fw-bolder special-underline mb-0">Manage Services</h1>

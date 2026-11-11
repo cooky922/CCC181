@@ -80,14 +80,59 @@
 {% block content %}
 <div class="d-flex flex-column flex-sm-row justify-content-sm-between align-items-start align-items-sm-center gap-2 mb-3">
   <h1 class="h3 fw-bolder special-underline mb-0">Staff Dashboard</h1>
-  <a class="btn btn-outline-primary fw-bold" href="{{ url_for('services_list') }}">Manage services</a>
+  <div class="d-flex flex-wrap align-items-center gap-2">
+    {# Only on wide screens, where the Now Printing area can sit beside or above the table. #}
+    <div class="d-none d-lg-flex align-items-center gap-2" id="layout-toggle">
+      <span class="small text-body-secondary" id="layout-label">Printing area</span>
+      <div class="btn-group btn-group-sm" role="group" aria-labelledby="layout-label">
+        <button type="button" class="btn btn-outline-primary" data-layout-choice="left" aria-pressed="true"
+                aria-label="Printing area on the left" title="Printing area on the left">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+            <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><rect x="1.75" y="2.75" width="4.5" height="10.5" fill="currentColor"/>
+          </svg>
+        </button>
+        <button type="button" class="btn btn-outline-primary" data-layout-choice="top" aria-pressed="false"
+                aria-label="Printing area on top" title="Printing area on top">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+            <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><rect x="1.75" y="2.75" width="12.5" height="4" fill="currentColor"/>
+          </svg>
+        </button>
+        <button type="button" class="btn btn-outline-primary" data-layout-choice="right" aria-pressed="false"
+                aria-label="Printing area on the right" title="Printing area on the right">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+            <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><rect x="9.75" y="2.75" width="4.5" height="10.5" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <a class="btn btn-outline-primary fw-bold" href="{{ url_for('services_list') }}">Manage services</a>
+  </div>
 </div>
+
+<style>
+  /* Below the large breakpoint: the status chips wrap (never more than 2 rows) and sit in the middle. */
+  @media (max-width: 991.98px) {
+    .pq-chips { flex-wrap: wrap; justify-content: center; overflow: visible; }
+    #filter-help { text-align: center; }
+  }
+  /* On very narrow screens 5 chips would need 3 rows, so they stay in one row that scrolls sideways. */
+  @media (max-width: 389.98px) {
+    .pq-chips { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; }
+    .pq-chip:first-child { margin-left: auto; }   /* with margin auto the row stays centered, */
+    .pq-chip:last-child { margin-right: auto; }   /* and the first chip is never cut off when it scrolls */
+  }
+  /* Large screens: where the Now Printing area goes (left is the normal layout). */
+  @media (min-width: 992px) {
+    #dashboard[data-layout="right"] .pq-printing { order: 2; }
+    #dashboard[data-layout="top"] .pq-printing,
+    #dashboard[data-layout="top"] .pq-requests { width: 100%; }
+  }
+</style>
 
 {# Messages from changes made without reloading (script adds them here). #}
 <div id="alerts" aria-live="polite"></div>
 
-{# TODO #}
-<div id="dashboard" tabindex="-1">
+<div id="dashboard" tabindex="-1" data-layout="left">
 
 {# Counts by status. Each one is also the filter: click a count to list those requests. #}
 <nav aria-label="Requests by status" aria-describedby="filter-help" class="mb-4">
@@ -105,7 +150,7 @@
 
 <div class="row g-4">
   {# LEFT COLUMN SIDE #}
-  <div class="col-12 col-lg-5">
+  <div class="col-12 col-lg-5 pq-printing">
     <h2 class="h5 fw-bold">Now Printing</h2>
     <div class="card mb-3">
       <div class="card-body p-3">
@@ -130,7 +175,7 @@
   </div>
 
   {# RIGHT COLUMN SIDE #}
-  <div class="col-12 col-lg-7">
+  <div class="col-12 col-lg-7 pq-requests">
     <h2 class="h5 fw-bold">{{ view_label }}{% if view != 'all' %} requests{% endif %}</h2>
 
     {% if rows %}
@@ -175,6 +220,30 @@
 {% endblock %}
 {% block scripts %}
 <script>
+  (() => {
+    const dashboard = document.getElementById("dashboard");
+    const buttons = document.querySelectorAll("[data-layout-choice]");
+    if (!dashboard || !buttons.length) return;
+
+    function choose(layout) {
+      dashboard.dataset.layout = layout;
+      buttons.forEach((b) => {
+        const on = b.dataset.layoutChoice === layout;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-pressed", String(on));
+      });
+    }
+
+    let saved = "left";
+    try { saved = localStorage.getItem("pq-printing-layout") || "left"; } catch (err) { /* storage can be blocked */ }
+    choose(["left", "top", "right"].includes(saved) ? saved : "left");
+
+    buttons.forEach((b) => b.addEventListener("click", () => {
+      choose(b.dataset.layoutChoice);
+      try { localStorage.setItem("pq-printing-layout", b.dataset.layoutChoice); } catch (err) { /* ignore */ }
+    }));
+  })();
+
   // NOTE:
   // Staff dashboard: change a status without reloading the page.
   // The buttons and links still work on their own (the server redirects back to /staff).
