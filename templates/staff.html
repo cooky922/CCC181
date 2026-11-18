@@ -6,11 +6,11 @@
 <dl class="row mb-0">
   <dt class="col-5">File</dt>
   <dd class="col-7 text-truncate" title="{{ t.file_name }}">
-    {% if t.file_path %}<a href="{{ url_for('staff_file', ticket_id=t.number) }}" aria-label="Download file for ticket {{ t.number }}">{{ t.file_name }}</a>
+    {% if t.stored_name %}<a href="{{ url_for('staff_file', ticket_id=t.id) }}" aria-label="Download file for ticket {{ t.id }}">{{ t.file_name }}</a>
     {% else %}{{ t.file_name }}{% endif %}
   </dd>
   <dt class="col-5">Color mode</dt><dd class="col-7">{{ t.color_mode }}</dd>
-  <dt class="col-5">Copies</dt><dd class="col-7">{{ t.number_of_copies }}</dd>
+  <dt class="col-5">Copies</dt><dd class="col-7">{{ t.copies }}</dd>
   <dt class="col-5">Paper type</dt><dd class="col-7">{{ t.paper_type }}</dd>
   <dt class="col-5">Paper size</dt><dd class="col-7 {% if not t.notes %}mb-0{% endif %}">{{ t.paper_size }}</dd>
   {% if t.notes %}<dt class="col-5">Notes</dt><dd class="col-7 mb-0">{{ t.notes }}</dd>{% endif %}
@@ -20,8 +20,10 @@
 {# Ticket number, requester and status, a line, then the specifications. Used twice, so both look the same. #}
 {% macro ticket_info(t) %}
 <dl class="row mb-0">
-  <dt class="col-5">Ticket number</dt><dd class="col-7">#{{ t.number }}</dd>
-  <dt class="col-5">Requester</dt><dd class="col-7">{{ t.name }}</dd>
+  <dt class="col-5">Ticket number</dt><dd class="col-7">#{{ t.id }}</dd>
+  <dt class="col-5">Requester</dt><dd class="col-7">{{ t.user.first_name }} {{ t.user.last_name }}</dd>
+  <dt class="col-5">Service</dt><dd class="col-7">{{ t.service.name }}</dd>
+  <dt class="col-5">Requested</dt><dd class="col-7">{{ t.created_at|local }}</dd>
   <dt class="col-5">Status</dt><dd class="col-7 mb-0"><span class="badge {{ STATUS_BADGE[t.status] }}">{{ STATUS_LABELS[t.status] }}</span></dd>
 </dl>
 <hr>
@@ -29,8 +31,8 @@
 {% endmacro %}
 
 {# One small POST form with one button. "view" keeps the same filter after the click. #}
-{% macro action(url, label, style, aria, view, disabled=False, hint='') %}
-<form method="post" action="{{ url }}" class="flex-fill">
+{% macro action(url, label, style, aria, view, disabled=False, hint='', confirm='') %}
+<form method="post" action="{{ url }}" class="flex-fill"{% if confirm %} data-confirm="{{ confirm }}"{% endif %}>
   <input type="hidden" name="view" value="{{ view }}">
   <button type="submit" class="btn {{ style }} w-100 fw-bolder" aria-label="{{ aria }}"
           {% if disabled %}disabled title="{{ hint }}"{% endif %}>{{ label }}</button>
@@ -39,27 +41,29 @@
 
 {% macro row_actions(t, view, printing, head_number) %}
 {% if t.status == 'waiting' %}
-  {% set blocked = printing or t.number != head_number %}
+  {% set blocked = printing or t.id != head_number %}
   <div class="d-flex gap-2">
-    {{ action(url_for('staff_action', ticket_id=t.number, action='start'), 'Print', 'btn-sm btn-primary', 'Print ticket ' ~ t.number, view, blocked,
-              ('Ticket #' ~ printing.number ~ ' is still printing. Mark it as ready first.') if printing else ('Ticket #' ~ head_number ~ ' goes first.')) }}
-    {{ action(url_for('staff_action', ticket_id=t.number, action='cancel'), 'Cancel', 'btn-sm btn-outline-danger', 'Cancel ticket ' ~ t.number, view) }}
+    {{ action(url_for('staff_action', ticket_id=t.id, action='start'), 'Print', 'btn-sm btn-primary', 'Print ticket ' ~ t.id, view, blocked,
+              ('Ticket #' ~ printing.id ~ ' is still printing. Mark it as ready first.') if printing else ('Ticket #' ~ head_number ~ ' goes first.')) }}
+    {{ action(url_for('staff_action', ticket_id=t.id, action='cancel'), 'Cancel', 'btn-sm btn-outline-danger', 'Cancel ticket ' ~ t.id, view) }}
   </div>
 {% elif t.status == 'ready' %}
-  <div class="d-flex">{{ action(url_for('staff_action', ticket_id=t.number, action='done'), 'Mark done', 'btn-sm btn-dark', 'Mark ticket ' ~ t.number ~ ' as done', view) }}</div>
+  <div class="d-flex">{{ action(url_for('staff_action', ticket_id=t.id, action='done'), 'Mark done', 'btn-sm btn-dark', 'Mark ticket ' ~ t.id ~ ' as done', view) }}</div>
 {% elif t.status == 'printing' %}
   <span class="text-body-secondary">See printing now</span>
-{% else %}
-  <span class="text-body-secondary">No actions</span>
 {% endif %}
+<div class="d-flex{% if t.status in ('waiting', 'ready', 'printing') %} mt-2{% endif %}">
+  {{ action(url_for('delete_ticket', ticket_id=t.id), 'Delete', 'btn-sm btn-outline-secondary', 'Delete ticket ' ~ t.id, view, false, '',
+            'Delete ticket ' ~ t.id ~ '? This cannot be undone.') }}
+</div>
 {% endmacro %}
 
 {% macro details_modal(t) %}
-<div class="modal fade" id="details-{{ t.number }}" tabindex="-1" aria-labelledby="details-title-{{ t.number }}" aria-hidden="true">
+<div class="modal fade" id="details-{{ t.id }}" tabindex="-1" aria-labelledby="details-title-{{ t.id }}" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h2 class="modal-title h5" id="details-title-{{ t.number }}">Print Details</h2>
+        <h2 class="modal-title h5" id="details-title-{{ t.id }}">Print Details</h2>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
@@ -74,13 +78,61 @@
 {% endmacro %}
 
 {% block content %}
-<h1 class="h3 mb-3 fw-bolder special-underline">Staff Dashboard</h1>
+<div class="d-flex flex-column flex-sm-row justify-content-sm-between align-items-start align-items-sm-center gap-2 mb-3">
+  <h1 class="h3 fw-bolder special-underline mb-0">Staff Dashboard</h1>
+  <div class="d-flex flex-wrap align-items-center gap-2">
+    {# Only on wide screens, where the Now Printing area can sit beside or above the table. #}
+    <div class="d-none d-lg-flex align-items-center gap-2" id="layout-toggle">
+      <span class="small text-body-secondary" id="layout-label">Printing area</span>
+      <div class="btn-group btn-group-sm" role="group" aria-labelledby="layout-label">
+        <button type="button" class="btn btn-outline-primary" data-layout-choice="left" aria-pressed="true"
+                aria-label="Printing area on the left" title="Printing area on the left">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+            <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><rect x="1.75" y="2.75" width="4.5" height="10.5" fill="currentColor"/>
+          </svg>
+        </button>
+        <button type="button" class="btn btn-outline-primary" data-layout-choice="top" aria-pressed="false"
+                aria-label="Printing area on top" title="Printing area on top">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+            <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><rect x="1.75" y="2.75" width="12.5" height="4" fill="currentColor"/>
+          </svg>
+        </button>
+        <button type="button" class="btn btn-outline-primary" data-layout-choice="right" aria-pressed="false"
+                aria-label="Printing area on the right" title="Printing area on the right">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+            <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><rect x="9.75" y="2.75" width="4.5" height="10.5" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <a class="btn btn-outline-primary fw-bold" href="{{ url_for('services_list') }}">Manage services</a>
+  </div>
+</div>
+
+<style>
+  /* Below the large breakpoint: the status chips wrap (never more than 2 rows) and sit in the middle. */
+  @media (max-width: 991.98px) {
+    .pq-chips { flex-wrap: wrap; justify-content: center; overflow: visible; }
+    #filter-help { text-align: center; }
+  }
+  /* On very narrow screens 5 chips would need 3 rows, so they stay in one row that scrolls sideways. */
+  @media (max-width: 389.98px) {
+    .pq-chips { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; }
+    .pq-chip:first-child { margin-left: auto; }   /* with margin auto the row stays centered, */
+    .pq-chip:last-child { margin-right: auto; }   /* and the first chip is never cut off when it scrolls */
+  }
+  /* Large screens: where the Now Printing area goes (left is the normal layout). */
+  @media (min-width: 992px) {
+    #dashboard[data-layout="right"] .pq-printing { order: 2; }
+    #dashboard[data-layout="top"] .pq-printing,
+    #dashboard[data-layout="top"] .pq-requests { width: 100%; }
+  }
+</style>
 
 {# Messages from changes made without reloading (script adds them here). #}
 <div id="alerts" aria-live="polite"></div>
 
-{# TODO #}
-<div id="dashboard" tabindex="-1">
+<div id="dashboard" tabindex="-1" data-layout="left">
 
 {# Counts by status. Each one is also the filter: click a count to list those requests. #}
 <nav aria-label="Requests by status" aria-describedby="filter-help" class="mb-4">
@@ -89,7 +141,7 @@
     {% for key, label in filters %}
     {% set count = c['total' if key == 'all' else key] %}
     <a class="pq-chip {{ chip_style[key] }} {% if key == view %}is-active{% endif %}"
-       href="{{ url_for('staff_dashboard', status=key) }}" {% if key == view %}aria-current="page"{% endif %}>
+       href="{{ url_for('staff_dashboard', status=key, service_id=selected) }}" {% if key == view %}aria-current="page"{% endif %}>
       <span class="pq-count">{{ count }}</span><span>{{ 'All' if key == 'all' else label }}</span>
     </a>
     {% endfor %}
@@ -98,7 +150,7 @@
 
 <div class="row g-4">
   {# LEFT COLUMN SIDE #}
-  <div class="col-12 col-lg-5">
+  <div class="col-12 col-lg-5 pq-printing">
     <h2 class="h5 fw-bold">Now Printing</h2>
     <div class="card mb-3">
       <div class="card-body p-3">
@@ -113,7 +165,7 @@
 
     {# Only the button that makes sense is shown. #}
     {% if printing %}
-    {{ action(url_for('staff_action', ticket_id=printing.number, action='ready'), 'Mark as ready for pickup', 'btn-primary', 'Mark ticket ' ~ printing.number ~ ' as ready for pickup', view) }}
+    {{ action(url_for('staff_action', ticket_id=printing.id, action='ready'), 'Mark as ready for pickup', 'btn-primary', 'Mark ticket ' ~ printing.id ~ ' as ready for pickup', view) }}
     {% elif head_number is not none %}
     <form method="post" action="{{ url_for('staff_call_next') }}">
       <input type="hidden" name="view" value="{{ view }}">
@@ -123,7 +175,7 @@
   </div>
 
   {# RIGHT COLUMN SIDE #}
-  <div class="col-12 col-lg-7">
+  <div class="col-12 col-lg-7 pq-requests">
     <h2 class="h5 fw-bold">{{ view_label }}{% if view != 'all' %} requests{% endif %}</h2>
 
     {% if rows %}
@@ -133,15 +185,17 @@
           <table class="table pq-table align-middle mb-0">
             <caption class="visually-hidden">{{ view_label }} print requests in ticket order</caption>
             <thead>
-              <tr><th scope="col">No.</th><th scope="col">Name</th><th scope="col">Details</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
+              <tr><th scope="col">No.</th><th scope="col">Name</th><th scope="col">Service</th><th scope="col">Requested</th><th scope="col">Details</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
             </thead>
             <tbody>
               {% for t in rows %}
               <tr>
-                <th scope="row">#{{ t.number }}</th>
-                <td>{{ t.name }}{% if t.number == head_number and not printing %} <span class="badge text-bg-light border">Next</span>{% endif %}</td>
+                <th scope="row">#{{ t.id }}</th>
+                <td>{{ t.user.first_name }} {{ t.user.last_name }}{% if t.id == head_number and not printing %} <span class="badge text-bg-light border">Next</span>{% endif %}</td>
+                <td>{{ t.service.name }}</td>
+                <td class="text-nowrap">{{ t.created_at|local }}</td>
                 <td><button class="btn btn-link p-0" type="button" data-bs-toggle="modal"
-                            data-bs-target="#details-{{ t.number }}" aria-label="View details for ticket {{ t.number }}">View Details</button></td>
+                            data-bs-target="#details-{{ t.id }}" aria-label="View details for ticket {{ t.id }}">View Details</button></td>
                 <td><span class="badge {{ STATUS_BADGE[t.status] }}">{{ STATUS_LABELS[t.status] }}</span></td>
                 <td>{{ row_actions(t, view, printing, head_number) }}</td>
               </tr>
@@ -166,6 +220,30 @@
 {% endblock %}
 {% block scripts %}
 <script>
+  (() => {
+    const dashboard = document.getElementById("dashboard");
+    const buttons = document.querySelectorAll("[data-layout-choice]");
+    if (!dashboard || !buttons.length) return;
+
+    function choose(layout) {
+      dashboard.dataset.layout = layout;
+      buttons.forEach((b) => {
+        const on = b.dataset.layoutChoice === layout;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-pressed", String(on));
+      });
+    }
+
+    let saved = "left";
+    try { saved = localStorage.getItem("pq-printing-layout") || "left"; } catch (err) { /* storage can be blocked */ }
+    choose(["left", "top", "right"].includes(saved) ? saved : "left");
+
+    buttons.forEach((b) => b.addEventListener("click", () => {
+      choose(b.dataset.layoutChoice);
+      try { localStorage.setItem("pq-printing-layout", b.dataset.layoutChoice); } catch (err) { /* ignore */ }
+    }));
+  })();
+
   // NOTE:
   // Staff dashboard: change a status without reloading the page.
   // The buttons and links still work on their own (the server redirects back to /staff).

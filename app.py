@@ -4,63 +4,42 @@ Run it with:
     flask --app app run --debug
 then open http://127.0.0.1:5000
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import os
 import re
 import uuid
+from dotenv import load_dotenv
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for, send_from_directory
+from flask_migrate import Migrate
+from sqlalchemy import func
+from sqlalchemy.exc import DataError, IntegrityError
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
+
+from models import Service, Ticket, User, db
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 SAVED_PDF = re.compile(r"^[0-9a-f]{32}\.pdf$")
+MAX_ID = 2147483647  # the biggest number an integer column can hold
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = "dev-only-change-me"  # Week 11 moves this into an environment variable
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # Max of 16 MB per upload
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ["DATABASE_URL"]
+app.config["SQLALCHEMY_ECHO"] = os.environ.get("SQLALCHEMY_ECHO") == "1"
 
-SERVICES = [
-    {"id": 1, "name": "Document Printing"},
-]
+db.init_app(app)
+migrate = Migrate(app, db)
 
 # Choices for the request form. The server checks every value against these lists.
 COLOR_MODES = ["Grayscale", "Colored"]
 PAPER_TYPES = ["Bond Paper", "Photo Paper", "Sticker Paper", "Cardstock"]
 PAPER_SIZES = ["Short", "A4", "Long"]
-
-# Sample data for the demo. It lives in memory, so it resets every time the
-# server restarts. A real app would save tickets in a database later.
-TICKETS = [
-    {
-        "number": 1,
-        "name": "Desmond Gold",
-        "service_id": 1,
-        "file_name": "assignment.pdf",
-        "file_path": None,
-        "number_of_copies": 3,
-        "paper_size": "A4",
-        "paper_type": "Bond Paper",
-        "color_mode": "Grayscale",
-        "notes": "",
-        "status": "printing",
-    },
-    {
-        "number": 2,
-        "name": "Lex Ian",
-        "service_id": 1,
-        "file_name": "report.pdf",
-        "file_path": None,
-        "number_of_copies": 1,
-        "paper_size": "Long",
-        "paper_type": "Bond Paper",
-        "color_mode": "Colored",
-        "notes": "",
-        "status": "waiting",
-    },
-]
 
 # Status words, badge styles and tracker steps for the My Place page.
 STATUS_LABELS = {
@@ -100,18 +79,25 @@ CHIP_STYLE = {
     "all": "chip-all",
 }
 
-def get_ticket(number):
-    return next((ticket for ticket in TICKETS if ticket["number"] == number), None)
+PH_TIME = timezone(timedelta(hours=8))  # Philippine time has no daylight saving
 
-def requests_ahead(ticket):
-    return sum(1 for x in TICKETS
-               if x["service_id"] == ticket["service_id"]
-               and x["status"] == "waiting"
-               and x["number"] < ticket["number"])
+@app.template_filter("local")
+def local_time(value):
+    """Show a database time in Philippine time, e.g. Nov 16, 08:01 AM."""
+    return value.astimezone(PH_TIME).strftime("%b %d, %I:%M %p") if value else ""
+
+def people_ahead(t):
+    """Count tickets still waiting for the same service that joined before t."""
+    stmt = (db.select(func.count())
+            .select_from(Ticket)
+            .where(Ticket.service_id == t.service_id,
+                   Ticket.status == "waiting",
+                   Ticket.created_at < t.created_at))
+    return db.session.scalar(stmt)
 
 def describe_ticket(ticket):
-    status = ticket["status"]
-    ahead = requests_ahead(ticket) if status == "waiting" else 0
+    status = ticket.status
+    ahead = people_ahead(ticket) if status == "waiting" else 0
     match status:
         case "waiting":
             message = "You're next!" if ahead == 0 else (
@@ -128,9 +114,29 @@ def describe_ticket(ticket):
         "status": status,
         "label": STATUS_LABELS[status],
         "badge": STATUS_BADGE[status],
+        "color": STATUS_COLOR[status],
         "ahead": ahead,
         "message": message
     }
+
+def all_services():
+    return db.session.scalars(db.select(Service).order_by(Service.name)).all()
+
+def active_services():
+    stmt = db.select(Service).filter_by(active=True).order_by(Service.name)
+    return db.session.scalars(stmt).all()
+
+def delete_pdf(t):
+    """Delete the ticket's PDF from the server and forget its name (FR-12)."""
+    if t.stored_name:
+        path = os.path.join(UPLOAD_DIR, t.stored_name)
+        if os.path.exists(path):
+            os.remove(path)
+        t.stored_name = None
+
+def clean_name(text):
+    """Remove extra spaces and capitalize each part: '  maria   dela CRUZ ' -> 'Maria Dela Cruz'."""
+    return " ".join(text.split()).title()
 
 def clock():
     return datetime.now().strftime("%I:%M %p").lstrip("0")
@@ -138,6 +144,7 @@ def clock():
 def form_context(form, errors, pending = None):
     return dict(form=form, 
                 errors=errors,
+                services=active_services(),
                 pending=pending,
                 color_modes=COLOR_MODES,
                 paper_types=PAPER_TYPES, 
@@ -151,31 +158,29 @@ def index():
 
 @app.get("/queue/<int:ticket_id>")
 def ticket(ticket_id):
-    ticket = get_ticket(ticket_id)
-    if ticket is None:
-        abort(404)  # no ticket with that number
-    return render_template("ticket.html", 
-                           ticket=ticket, 
-                           info=describe_ticket(ticket),
-                           first_name=ticket["name"].split()[0],
+    t = db.get_or_404(Ticket, ticket_id)
+    return render_template("ticket.html",
+                           ticket=t,
+                           service=t.service,
+                           info=describe_ticket(t),
+                           first_name=t.user.first_name,
                            updated=clock())
 
 @app.get("/queue/<int:ticket_id>/status.json")
 def ticket_status(ticket_id):
-    ticket = get_ticket(ticket_id)
-    if ticket is None:
-        abort(404)
-    return jsonify({**describe_ticket(ticket), "updated": clock()})
+    t = db.get_or_404(Ticket, ticket_id)
+    return jsonify({**describe_ticket(t), "updated": clock()})
 
 @app.post("/queue/<int:ticket_id>/leave")
 def leave(ticket_id):
-    ticket = get_ticket(ticket_id)
-    if ticket is None:
-        abort(404)
-    if ticket["status"] != "waiting":
+    t = db.get_or_404(Ticket, ticket_id)
+    if t.status != "waiting":
         flash("Only a request that is still waiting can be cancelled.", "warning")
         return redirect(url_for("ticket", ticket_id=ticket_id))
-    ticket["status"] = "cancelled"
+    t.status = "cancelled"  # soft delete: the row stays for reports
+    t.finished_at = func.now()
+    delete_pdf(t)
+    db.session.commit()
     flash(f"Request #{ticket_id} was cancelled. You can send a new request anytime.", "info")
     return redirect(url_for("index"))
 
@@ -203,6 +208,11 @@ def pending_upload(name):
     response.headers["Cache-Control"] = "no-store"
     return response
 
+@app.get("/services.json")
+def services_json():
+    """The services people can choose right now. The join page asks for this every 10 seconds."""
+    return jsonify([{"id": s.id, "name": s.name} for s in active_services()])
+
 @app.get("/join")
 def join_form():
     return render_template("join.html", **form_context({}, {}))
@@ -210,9 +220,12 @@ def join_form():
 @app.post("/join")
 def join():
     form = request.form
-    name = form.get("name", "").strip()
+    first_name = clean_name(form.get("first_name", ""))
+    last_name = clean_name(form.get("last_name", ""))
+    service_id = form.get("service_id", type=int)
+    service = db.session.get(Service, service_id) if service_id and 0 < service_id <= MAX_ID else None
     color_mode = form.get("color_mode", "")
-    copies = form.get("number_of_copies", type=int)
+    copies = form.get("copies", type=int)
     paper_type = form.get("paper_type", "")
     paper_size = form.get("paper_size", "")
     notes = form.get("notes", "").strip()
@@ -222,10 +235,20 @@ def join():
     file_label = form.get("pending_label", "")[:120] if kept_name else ""
 
     errors = {}
-    if not name:
-        errors["name"] = "Enter your name."
-    elif len(name) > 60:
-        errors["name"] = "Keep your name under 60 characters."
+    if not first_name:
+        errors["first_name"] = "Enter your first name."
+    elif len(first_name) > 60:
+        errors["first_name"] = "Keep your first name under 60 characters."
+    if not last_name:
+        errors["last_name"] = "Enter your last name."
+    elif len(last_name) > 60:
+        errors["last_name"] = "Keep your last name under 60 characters."
+    if not active_services():
+        errors["service_id"] = "No service is active right now. Please try again later."
+    elif service is None:
+        errors["service_id"] = "Choose a service."
+    elif not service.active:
+        errors["service_id"] = "That service is not available anymore. Choose another one."
 
     # Check whether the user selected a NEW file.
     # An empty filename means no new file was selected.
@@ -234,6 +257,9 @@ def join():
     if has_new_upload:
         if not upload.filename.lower().endswith(".pdf"):
             errors["file"] = "Only PDF files are accepted. Save or export your file as a PDF first."
+
+        elif len(secure_filename(upload.filename)) > 255:
+            errors["file"] = "That file name is too long. Rename it to under 255 characters."
 
         elif upload.stream.read(5) != b"%PDF-":
             errors["file"] = "That file does not look like a valid PDF. Try exporting it again."
@@ -261,7 +287,7 @@ def join():
     if color_mode not in COLOR_MODES:
         errors["color_mode"] = "Choose Grayscale or Colored."
     if copies is None or not 1 <= copies <= 100:
-        errors["number_of_copies"] = "Enter a number of copies from 1 to 100."
+        errors["copies"] = "Enter a number of copies from 1 to 100."
     if paper_type not in PAPER_TYPES:
         errors["paper_type"] = "Choose a paper type."
     if paper_size not in PAPER_SIZES:
@@ -269,45 +295,63 @@ def join():
     if len(notes) > 300:
         errors["notes"] = "Keep additional instructions under 300 characters."
 
+    pending = {"file": stored_name, "label": file_label} if stored_name else None
+
     if errors:
-        flash("Please fix the highlighted fields.", "danger")
-        pending = {"file": stored_name, "label": file_label} if stored_name else None
+        if active_services():
+            flash("Please fix the highlighted fields.", "danger")
+        else:
+            flash("No service is available right now. Come back later.", "danger")
         return render_template("join.html", **form_context(form, errors, pending)), 400
 
-    number = TICKETS[-1]["number"] + 1 if TICKETS else 1
-    TICKETS.append({
-        "number": number,
-        "name": name,
-        "service_id": SERVICES[0]["id"],
-        "file_name": file_label,
-        "file_path": f"uploads/{stored_name}",
-        "number_of_copies": copies,
-        "paper_size": paper_size,
-        "paper_type": paper_type,
-        "color_mode": color_mode,
-        "notes": notes,
-        "status": "waiting",
-    })
-    flash(f"Request submitted. Your ticket is #{number}.", "success")
-    return redirect(url_for("ticket", ticket_id=number))
+    # Same first and last name (any capitalization) is the same person.
+    user = db.session.scalar(
+        db.select(User).filter_by(first_name=first_name, last_name=last_name)
+    )
+    if user is None:
+        user = User(first_name=first_name, last_name=last_name)
+    ticket = Ticket(
+        user=user,
+        service=service,
+        file_name=file_label,
+        stored_name=stored_name,
+        color_mode=color_mode,
+        copies=copies,
+        paper_type=paper_type,
+        paper_size=paper_size,
+        notes=notes or None,
+    )
+    db.session.add(ticket)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("Something went wrong saving your request. Please try again.", "danger")
+        return render_template("join.html", **form_context(form, {}, pending)), 409
 
-def get_status_count_table():
+    flash(f"Request submitted. Your ticket is #{ticket.id}.", "success")
+    return redirect(url_for("ticket", ticket_id=ticket.id))
+
+def get_status_count_table(service_id=None):
     c = {key: 0 for key in STATUS_LABELS}
-    for t in TICKETS:
-        c[t["status"]] += 1
-    c["total"] = len(TICKETS)
+    stmt = db.select(Ticket.status, func.count()).group_by(Ticket.status)
+    if service_id:
+        stmt = stmt.where(Ticket.service_id == service_id)
+    for status, number in db.session.execute(stmt):
+        c[status] = number
+    c["total"] = sum(c.values())
     return c
 
-
 def waiting_list():
-    """Waiting requests in ticket order (oldest first)."""
-    return sorted((t for t in TICKETS if t["status"] == "waiting"), key=lambda t: t["number"])
-
+    """Waiting requests in the order they joined (oldest first)."""
+    stmt = (db.select(Ticket)
+            .where(Ticket.status == "waiting")
+            .order_by(Ticket.created_at, Ticket.id))
+    return db.session.scalars(stmt).all()
 
 def current_printing():
     """The one request being printed right now, or None."""
-    return next((t for t in TICKETS if t["status"] == "printing"), None)
-
+    return db.session.scalar(db.select(Ticket).where(Ticket.status == "printing"))
 
 @app.context_processor
 def inject_status_words():
@@ -316,26 +360,31 @@ def inject_status_words():
             "STATUS_COLOR": STATUS_COLOR}
 
 def chosen_filter(value):
-    """Only known filter names are accepted; anything else falls back to Waiting."""
     return value if value in dict(FILTERS) else "waiting"
 
 @app.get("/staff")
 def staff_dashboard():
     view = chosen_filter(request.args.get("status"))
-    everyone = sorted(TICKETS, key=lambda t: t["number"])
-    rows = everyone if view == "all" else [t for t in everyone if t["status"] == view]
-    printing = current_printing()
+    service_id = request.args.get("service_id", type=int)
+    stmt = db.select(Ticket).order_by(Ticket.created_at, Ticket.id)
+    if view != "all":
+        stmt = stmt.where(Ticket.status == view)
+    if service_id:
+        stmt = stmt.where(Ticket.service_id == service_id)
+    rows = db.session.scalars(stmt).all()
     waiting = waiting_list()
     return render_template(
         "staff.html",
-        printing=printing,
+        printing=current_printing(),
         rows=rows,
         chip_style=CHIP_STYLE,
         filters=FILTERS,
         view=view,
         view_label=dict(FILTERS)[view],
-        head_number=waiting[0]["number"] if waiting else None,
-        c=get_status_count_table(),
+        head_number=waiting[0].id if waiting else None,
+        c=get_status_count_table(service_id),
+        services=all_services(),
+        selected=service_id,
     )
 
 def back_to_dashboard():
@@ -343,18 +392,26 @@ def back_to_dashboard():
     return redirect(url_for("staff_dashboard", status=chosen_filter(request.form.get("view"))))
 
 def start_printing(ticket_id=None):
-    """Move the oldest waiting request to printing. Returns True if it started."""
+    """Move the oldest waiting request to printing."""
     waiting = waiting_list()
     busy = current_printing()
     if busy:
-        flash(f"Ticket #{busy['number']} is still printing. Mark it as ready first.", "warning")
+        flash(f"Ticket #{busy.id} is still printing. Mark it as ready first.", "warning")
     elif not waiting:
         flash("No one is waiting.", "info")
-    elif ticket_id is not None and waiting[0]["number"] != ticket_id:
-        flash(f"First come, first served: ticket #{waiting[0]['number']} goes first.", "warning")
+    elif ticket_id is not None and waiting[0].id != ticket_id:
+        flash(f"First come, first served: ticket #{waiting[0].id} goes first.", "warning")
     else:
-        waiting[0]["status"] = "printing"
-        flash(f"Ticket #{waiting[0]['number']} is now printing.", "info")
+        t = waiting[0]
+        t.status = "printing"
+        t.printing_at = func.now()  # the database fills in the time
+        try:
+            db.session.commit()
+            flash(f"Ticket #{t.id} is now printing.", "info")
+        except IntegrityError:
+            # Two staff clicked at once: the database allows only one printing ticket.
+            db.session.rollback()
+            flash("Another request is already printing.", "warning")
 
 @app.post("/staff/call-next")
 def staff_call_next():
@@ -364,10 +421,10 @@ def staff_call_next():
 @app.post("/staff/tickets/<int:ticket_id>/<action>")
 def staff_action(ticket_id, action):
     # Data-changing actions use POST, and the server re-checks every rule.
-    t = get_ticket(ticket_id)
-    if t is None or action not in ("start", "ready", "done", "cancel"):
+    if action not in ("start", "ready", "done", "cancel"):
         abort(404)
-    status = t["status"]
+    t = db.get_or_404(Ticket, ticket_id)
+    status = t.status
 
     if action == "start":
         if status != "waiting":
@@ -378,40 +435,126 @@ def staff_action(ticket_id, action):
         if status != "printing":
             flash("Only the request that is printing can be marked ready.", "warning")
         else:
-            t["status"] = "ready"
+            t.status = "ready"
+            t.ready_at = func.now()
+            db.session.commit()
             flash(f"Ticket #{ticket_id} is ready for pickup.", "success")
     elif action == "done":
         if status != "ready":
             flash("Only a ready request can be marked done.", "warning")
         else:
-            t["status"] = "done"
+            t.status = "done"
+            t.finished_at = func.now()
+            delete_pdf(t)
+            db.session.commit()
             flash(f"Ticket #{ticket_id} is done.", "success")
     else:  # cancel
         if status != "waiting":
             flash("Only a waiting request can be cancelled.", "warning")
         else:
-            t["status"] = "cancelled"
+            t.status = "cancelled"
+            t.finished_at = func.now()
+            delete_pdf(t)
+            db.session.commit()
             flash(f"Ticket #{ticket_id} was cancelled.", "info")
+    return back_to_dashboard()
+
+@app.post("/staff/tickets/<int:ticket_id>/delete")
+def delete_ticket(ticket_id):
+    """Hard delete: the PDF goes first, then the ticket row. The user row stays."""
+    t = db.get_or_404(Ticket, ticket_id)
+    delete_pdf(t)
+    db.session.delete(t)
+    db.session.commit()
+    flash(f"Ticket #{ticket_id} was deleted.", "warning")
     return back_to_dashboard()
 
 @app.get("/staff/tickets/<int:ticket_id>/file")
 def staff_file(ticket_id):
-    t = get_ticket(ticket_id)
-    if t is None or not t.get("file_path"):
+    t = db.get_or_404(Ticket, ticket_id)
+    if not saved_pdf(t.stored_name):
         abort(404)
-    return send_from_directory(UPLOAD_DIR, 
-                               os.path.basename(t["file_path"]),
-                               as_attachment=True, 
-                               download_name=t["file_name"])
+    return send_from_directory(UPLOAD_DIR,
+                               t.stored_name,
+                               as_attachment=True,
+                               download_name=t.file_name)
+
+def clean_service_name(text):
+    return " ".join(text.split())
+
+@app.get("/staff/services")
+def services_list():
+    return render_template("services.html", services=all_services())
+
+@app.post("/staff/services")
+def service_create():
+    name = clean_service_name(request.form.get("name", ""))
+    if not name or len(name) > 100:
+        flash("Enter a service name (up to 100 characters).", "danger")
+        return redirect(url_for("services_list"))
+    db.session.add(Service(name=name))
+    try:
+        db.session.commit()
+        flash(f"Service \"{name}\" added.", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash(f"A service named \"{name}\" already exists.", "danger")
+    return redirect(url_for("services_list"))
+
+@app.post("/staff/services/<int:service_id>/edit")
+def service_edit(service_id):
+    s = db.get_or_404(Service, service_id)
+    name = clean_service_name(request.form.get("name", ""))
+    if not name or len(name) > 100:
+        flash("Enter a service name (up to 100 characters).", "danger")
+        return redirect(url_for("services_list"))
+    s.name = name
+    s.active = request.form.get("active") == "on"  # an unticked box is not sent at all
+    try:
+        db.session.commit()
+        flash(f"Service \"{name}\" updated.", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash(f"A service named \"{name}\" already exists.", "danger")
+    return redirect(url_for("services_list"))
+
+@app.post("/staff/services/<int:service_id>/delete")
+def service_delete(service_id):
+    s = db.get_or_404(Service, service_id)
+    name = s.name
+    if s.tickets:
+        flash(f"\"{name}\" has tickets, so it cannot be deleted. Turn it off instead.", "danger")
+        return redirect(url_for("services_list"))
+    db.session.delete(s)
+    db.session.commit()
+    flash(f"Service \"{name}\" deleted.", "warning")
+    return redirect(url_for("services_list"))
 
 @app.errorhandler(RequestEntityTooLarge)
 def too_large(_err):
     flash("That file is too large. The limit is 16 MB.", "danger")
     return render_template("join.html", **form_context({}, {"file": "Choose a PDF under 16 MB."})), 413
 
+@app.errorhandler(DataError)
+def value_out_of_range(_err):
+    """A number too big for an integer column (for example /queue/99999999999) is just a missing page."""
+    db.session.rollback()
+    return render_template("404.html"), 404
+
 @app.errorhandler(404)
 def page_not_found(error):
     return render_template("404.html"), 404
+
+@app.cli.command("seed")
+def seed():
+    """Add the starting services if they are not there yet."""
+    starting = [("Printing")]
+    for name in starting:
+        exists = db.session.scalar(db.select(Service).filter_by(name=name))
+        if exists is None:
+            db.session.add(Service(name=name))
+    db.session.commit()
+    print("Services are ready.")
 
 if __name__ == "__main__":
     app.run(debug=True)
