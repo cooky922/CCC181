@@ -10,7 +10,7 @@
 | **Student ID** | 2024-0083 |
 | **Section** | CS3B |
 | **Date** | November 11, 2026 |
-| **Pull request** | https://github.com/cooky922/CCC181/pull/NUMBER |
+| **Pull request** | https://github.com/cooky922/CCC181/pull/5 |
 
 ## 2. Requirements
 
